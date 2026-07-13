@@ -6,7 +6,36 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import enum
 import io
+# --- UUS: LEHE SEADISTUS JA SISSELOGIMINE ---
+st.set_page_config(page_title="Nutikas Laosüsteem", page_icon="📦", layout="wide", initial_sidebar_state="expanded")
 
+def check_password():
+    """Kontrollib, kas kasutaja on õige parooli sisestanud."""
+    def password_entered():
+        # Võrdleb sisestatud parooli Streamlit Secretsis oleva parooliga
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Kustutame parooli turvalisuse mõttes mälust
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+
+    if not st.session_state["password_correct"]:
+        st.markdown("<br><br><h1 style='text-align: center;'>🔒 Turvaline ligipääs</h1>", unsafe_allow_html=True)
+        # Teeme kasti keskele
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.text_input("Palun sisesta laosüsteemi parool:", type="password", on_change=password_entered, key="password")
+            if st.session_state.get("password_correct") == False:
+                st.error("😕 Vale parool! Proovi uuesti.")
+        return False
+    return True
+
+# Kui parool on vale või sisestamata, siis siit edasi süsteemi ei laeta!
+if not check_password():
+    st.stop()
 # ==========================================
 # 1. ANDMEBAASI SEADISTUS (SQLite)
 # ==========================================
@@ -210,7 +239,6 @@ def calculate_global_inventory(db):
 # ==========================================
 # 3. KASUTAJALIIDESE SEADISTUS JA MENÜÜ
 # ==========================================
-st.set_page_config(page_title="Nutikas Laosüsteem", page_icon="📦", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
