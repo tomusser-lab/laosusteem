@@ -305,7 +305,9 @@ st.markdown("""
     
     .stTextInput input, .stNumberInput input { border-radius: 10px !important; border: 1px solid #CBD5E1 !important; padding: 0.5rem 1rem !important; }
     .stTextInput input:focus, .stNumberInput input:focus { border-color: #3B82F6 !important; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important; }
-    [data-testid="stDataFrame"] { background-color: #FFFFFF; border-radius: 16px; padding: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; }
+    [data-testid="stDataFrame"] { background-color: #FFFFFF; border-radius: 16px; padding: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; }
+    [data-testid="stExpander"] { background-color: #FFFFFF; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; overflow: hidden; }
+    [data-testid="stExpander"] details { border-color: transparent; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -426,7 +428,7 @@ def render_catalog(db):
     if f_tarnija:
         filtered_df = filtered_df[filtered_df["Tarnija"].isin(f_tarnija)]
         
-    st.markdown(f"<div style='margin-top: 0.5rem; margin-bottom: -1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:0.9rem;'>Kuvatakse {len(filtered_df)} rida</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='margin-top: 1rem; margin-bottom: 1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Kuvatakse {len(filtered_df)} rida</span></div>", unsafe_allow_html=True)
     # ----------------------
 
     with h_col2: render_excel_download(filtered_df, "tootekataloog") # Excel laeb nüüd alla filtreeritud info!
