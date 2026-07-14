@@ -766,6 +766,14 @@ def render_orders(db):
             st.dataframe(df_h.style.map(lambda v: format_color_status(v, ['Tühistatud'], ['Saabunud']), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
         else: st.info("Ajalugu on tühi.")
         
+    # ... existing code ...
+    with tab_hist:
+        hist = db.query(PurchaseOrder).options(joinedload(PurchaseOrder.product), joinedload(PurchaseOrder.supplier)).filter(PurchaseOrder.status != OrderStatus.PENDING).order_by(PurchaseOrder.id.desc()).limit(1000).all()
+        if hist:
+            df_h = pd.DataFrame([{"ID": o.id, "Toode": o.product.name, "Kogus": f"{o.quantity:g} {o.product.purchase_unit}", "Tarnija": o.supplier.name if o.supplier else "-", "Hind": o.price, "Seis": o.status.value, "Saabus": o.arrival_date.strftime("%d.%m.%Y") if o.arrival_date else "-"} for o in hist])
+            st.dataframe(df_h.style.map(lambda v: format_color_status(v, ['Tühistatud'], ['Saabunud']), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
+        else: st.info("Ajalugu on tühi.")
+        
     with tab_gsheets:
         st.markdown("Tõmba **ostuvajadused** automaatselt Google Sheetsist ja võrdle neid **laoseisuga**.")
         st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Kõik, kellel on link, saavad vaadata).\n2. Tabelis peavad olema veerud, kus sisalduvad sõnad: **Nimetus** (või Kood), **Kogus** ja **Nädal**.")
@@ -823,9 +831,18 @@ def render_orders(db):
                 analysis_results = []
                 orders_to_create = [] 
                 
-                # Sorteerime faili sisu nädala järgi, et näha kulumist ajas
+                # Sorteerime faili sisu nädala järgi, et näha kulumist ajas.
+                # Eraldi loogika, et "*" (määramata nädal) läheks ALATI kõige lõppu!
                 try:
-                    df_gs_sorted = df_gs.sort_values(by=[nadal_col])
+                    def custom_week_sort(w):
+                        val = str(w).strip()
+                        # Kui lahtris on *, tühi või sidekriips, lükkame selle z-tähega tabeli lõppu
+                        if val == '*' or val == '-' or val == '': 
+                            return 'ZZZZZZ'
+                        return val.upper()
+                        
+                    df_gs['__sort_key'] = df_gs[nadal_col].apply(custom_week_sort)
+                    df_gs_sorted = df_gs.sort_values(by=['__sort_key'])
                 except Exception:
                     df_gs_sorted = df_gs
                 
