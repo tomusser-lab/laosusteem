@@ -859,7 +859,7 @@ def render_product_management(db):
                     st.markdown("### Eelvaade")
                     st.dataframe(df_upload, use_container_width=True, hide_index=True)
                     
-                   if st.button("💾 Salvesta tooted andmebaasi", type="primary", use_container_width=True):
+                    if st.button("💾 Salvesta tooted andmebaasi", type="primary", use_container_width=True):
                         added_count = 0
                         error_count = 0
                         
