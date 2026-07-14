@@ -40,27 +40,10 @@ if not check_password():
 # 1. ANDMEBAASI SEADISTUS (OPTIMEERITUD ÜHENDUS)
 # ==========================================
 SQLALCHEMY_DATABASE_URL = st.secrets["SUPABASE_URL"]
-
-# Lisatud Connection Pooling seaded stabiilsuse ja kiiruse jaoks võrgus!
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    pool_size=10,          # Hoiab lahti kuni 10 ühendust
-    max_overflow=20,       # Lubab tippkoormusel avada lisaks kuni 20
-    pool_pre_ping=True,    # Kontrollib ühendust enne kasutamist
-    pool_recycle=1800      # Taaskäivitab ühendused iga 30min tagant
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def get_estonian_time():
     return datetime.now(ZoneInfo("Europe/Tallinn")).replace(tzinfo=None)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        return db
-    except Exception:
-        db.close()
 
 class Supplier(Base):
     __tablename__ = "suppliers"
@@ -127,27 +110,51 @@ class PurchaseOrder(Base):
     product = relationship("Product", back_populates="purchase_orders")
     supplier = relationship("Supplier", back_populates="purchase_orders")
 
-Base.metadata.create_all(bind=engine)
+@st.cache_resource(show_spinner=False)
+def init_database_connection():
+    """Loob andmebaasi mootori, kontrollib struktuuri ja hoiab sessiooni vahemälus."""
+    # Lisatud Connection Pooling seaded stabiilsuse ja kiiruse jaoks võrgus!
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_size=10,          # Hoiab lahti kuni 10 ühendust
+        max_overflow=20,       # Lubab tippkoormusel avada lisaks kuni 20
+        pool_pre_ping=True,    # Kontrollib ühendust enne kasutamist
+        pool_recycle=1800      # Taaskäivitab ühendused iga 30min tagant
+    )
+    
+    Base.metadata.create_all(bind=engine)
 
-with engine.begin() as conn:
-    def get_columns(table_name):
-        result = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"))
-        return [row[0] for row in result]
+    with engine.begin() as conn:
+        def get_columns(table_name):
+            result = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"))
+            return [row[0] for row in result]
 
-    columns_t = get_columns("transactions")
-    if columns_t:
-        if "supplier_id" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
-        if "supplier_code" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_code VARCHAR"))
-        if "supplier_product_name" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_product_name VARCHAR"))
-        
-    columns_p = get_columns("products")
-    if columns_p:
-        if "conversion_multiplier" not in columns_p: conn.execute(text("ALTER TABLE products ADD COLUMN conversion_multiplier FLOAT DEFAULT 1.0"))
-        
-    columns_po = get_columns("purchase_orders")
-    if columns_po:
-        if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
-        if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
+        columns_t = get_columns("transactions")
+        if columns_t:
+            if "supplier_id" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
+            if "supplier_code" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_code VARCHAR"))
+            if "supplier_product_name" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_product_name VARCHAR"))
+            
+        columns_p = get_columns("products")
+        if columns_p:
+            if "conversion_multiplier" not in columns_p: conn.execute(text("ALTER TABLE products ADD COLUMN conversion_multiplier FLOAT DEFAULT 1.0"))
+            
+        columns_po = get_columns("purchase_orders")
+        if columns_po:
+            if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
+            if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
+            
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Initsialiseerime andmebaasi (tänu @st.cache_resource dekoraatorile tehakse seda VAID ÜKS KORD!)
+SessionLocal = init_database_connection()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        return db
+    except Exception:
+        db.close()
 
 
 # ==========================================
