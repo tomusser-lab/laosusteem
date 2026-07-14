@@ -758,115 +758,179 @@ def render_orders(db):
             st.dataframe(df_h.style.map(lambda v: format_color_status(v, ['Tühistatud'], ['Saabunud']), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
         else: st.info("Ajalugu on tühi.")
         
-    with tab_gsheets:
-        st.markdown("Tõmba **ostuvajadused** automaatselt Google Sheetsist ja loo nendest süsteemis ootel tellimused.")
-        st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Jagamise seadetes: *\"Kõik, kellel on link, saavad vaadata\"*).\n2. Tabelis peavad olema veerud **Nimetus** (või Tootekood) ja **Kogus**.\n3. Kui soovid andmeid kindlalt vahelehelt (sheet), kopeeri link **olles ise sel vahelehel** (link peab lõppema `gid=...`).")
+    # ... existing code ...
+    with tab_hist:
+        hist = db.query(PurchaseOrder).options(joinedload(PurchaseOrder.product), joinedload(PurchaseOrder.supplier)).filter(PurchaseOrder.status != OrderStatus.PENDING).order_by(PurchaseOrder.id.desc()).limit(1000).all()
+        if hist:
+            df_h = pd.DataFrame([{"ID": o.id, "Toode": o.product.name, "Kogus": f"{o.quantity:g} {o.product.purchase_unit}", "Tarnija": o.supplier.name if o.supplier else "-", "Hind": o.price, "Seis": o.status.value, "Saabus": o.arrival_date.strftime("%d.%m.%Y") if o.arrival_date else "-"} for o in hist])
+            st.dataframe(df_h.style.map(lambda v: format_color_status(v, ['Tühistatud'], ['Saabunud']), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
+        else: st.info("Ajalugu on tühi.")
         
-        gsheet_url = st.text_input("Kleebi Google Sheetsi avalik link siia:")
+    with tab_gsheets:
+        st.markdown("Tõmba **ostuvajadused** automaatselt Google Sheetsist ja võrdle neid **laoseisuga**.")
+        st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Kõik, kellel on link, saavad vaadata).\n2. Tabelis peavad olema veerud, kus sisalduvad sõnad: **Nimetus** (või Kood), **Kogus** ja **Nädal**.")
+        
+        gsheet_url = st.text_input("Kleebi Google Sheetsi avalik link siia (koos õige lehe #gid parameetriga):")
         
         if st.button("⬇️ Tõmba andmed", use_container_width=True):
             if not gsheet_url:
                 st.error("Palun kleebi link enne tõmbamist!")
             else:
                 try:
-                    # Muudame tavalise lingi csv allalaadimise lingiks, arvestades ka GID-i (konkreetse sheet'i ID)
+                    # Eraldame GID, et tõmmata andmed ÕIGELT vahelehelt (nt "Ostuvajadus")
                     csv_url = gsheet_url
                     if "/edit" in gsheet_url:
                         base_url = gsheet_url.split("/edit")[0]
-                        # Otsime, kas URL-is on gid parameeter
-                        gid_param = ""
+                        gid_part = ""
                         if "gid=" in gsheet_url:
-                            # Eraldame gid väärtuse
-                            gid_val = gsheet_url.split("gid=")[1].split("&")[0]
-                            gid_param = f"&gid={gid_val}"
-                            
-                        csv_url = f"{base_url}/export?format=csv{gid_param}"
+                            gid_part = "&" + gsheet_url.split("#")[1] if "#" in gsheet_url else "&gid=" + gsheet_url.split("gid=")[1].split("&")[0]
+                        csv_url = base_url + "/export?format=csv" + gid_part
                         
                     df_gs = pd.read_csv(csv_url, dtype=str)
                     st.session_state['gsheet_df'] = df_gs
                     st.session_state['gsheet_success'] = "Andmed edukalt Google Sheetsist loetud!"
                 except Exception as e:
-                    st.error(f"Viga andmete lugemisel! Palun kontrolli, et link on õige ja dokument on avalik. Detailid: {e}")
+                    st.error(f"Viga andmete lugemisel! Palun kontrolli linki ja avalikustamist. Detailid: {e}")
                     
         if 'gsheet_success' in st.session_state:
             st.success(st.session_state.pop('gsheet_success'))
             
         df_gs = st.session_state.get('gsheet_df')
         if df_gs is not None:
-            st.markdown("### Andmete eelvaade")
-            st.dataframe(df_gs, use_container_width=True, hide_index=True)
-            
-            if st.button("💾 Koosta ostutellimused", type="primary", use_container_width=True):
-                if "Kogus" not in df_gs.columns:
-                    st.error("⚠️ Viga: Sinu Google Sheetsi tabelis puudub veerg nimega 'Kogus'!")
-                elif "Nimetus" not in df_gs.columns and "Tootekood" not in df_gs.columns:
-                    st.error("⚠️ Viga: Tabelis peab olema vähemalt üks nendest veergudest: 'Nimetus' või 'Tootekood'!")
-                else:
-                    added_orders = 0
-                    error_orders = 0
+            # Leiame õiged veerud dünaamiliselt osa järgi
+            kogus_col = next((c for c in df_gs.columns if "kogus" in str(c).lower()), None)
+            kood_col = next((c for c in df_gs.columns if "kood" in str(c).lower()), None)
+            nimi_col = next((c for c in df_gs.columns if "nimetus" in str(c).lower()), None)
+            nadal_col = next((c for c in df_gs.columns if "nädal" in str(c).lower() or "nadal" in str(c).lower()), None)
+
+            if not kogus_col or (not nimi_col and not kood_col) or not nadal_col:
+                st.error(f"⚠️ Viga: Google Sheetsi tabelist ei leitud kõiki vajalikke veerge (Nimetus/Kood, Kogus, Nädal). Tuvastatud veerud olid: {', '.join(df_gs.columns)}")
+            else:
+                st.markdown("### 📊 Materjali vajaduse analüüs")
+                
+                # Andmete ettevalmistus - laeme tooted
+                all_products = db.query(Product).all()
+                code_map = {p.code: p for p in all_products if p.code}
+                name_map = {p.name: p for p in all_products}
+                
+                # Laeme hetke PÕHILAO seisu kõikidele toodetele korraga
+                _, inventory_data, _, _, _ = calculate_global_inventory(db)
+                stock_by_code = {item["Tootekood"]: item["Põhiladu"] for item in inventory_data if item["Tootekood"] != "-"}
+                stock_by_name = {item["Nimetus"]: item["Põhiladu"] for item in inventory_data}
+                
+                # Jooksev laoseis virtuaalseks kulutamiseks
+                running_stock = {}
+                analysis_results = []
+                orders_to_create = [] 
+                
+                # Sorteerime faili sisu nädala järgi, et näha kulumist ajas
+                try:
+                    df_gs_sorted = df_gs.sort_values(by=[nadal_col])
+                except Exception:
+                    df_gs_sorted = df_gs
+                
+                for _, row in df_gs_sorted.iterrows():
+                    code_val = str(row.get(kood_col, "")).strip() if kood_col else ""
+                    name_val = str(row.get(nimi_col, "")).strip() if nimi_col else ""
+                    week_val = str(row.get(nadal_col, "")).strip()
                     
-                    # Laeme tooted mällu kiireks otsinguks
-                    all_products = db.query(Product).all()
-                    code_map = {p.code: p for p in all_products if p.code}
-                    name_map = {p.name: p for p in all_products}
+                    if code_val.lower() == 'nan': code_val = ""
+                    if name_val.lower() == 'nan': name_val = ""
+                    if week_val.lower() == 'nan': week_val = "-"
                     
-                    for _, row in df_gs.iterrows():
-                        try:
-                            # Koguse numbriliseks muutmine (arvestame komade ja tühikutega)
-                            qty_str = str(row.get("Kogus", "")).strip().replace(",", ".")
-                            if qty_str.lower() in ["nan", "none", ""]: continue
-                            qty = float(qty_str)
-                            if qty <= 0: continue
+                    qty_str = str(row.get(kogus_col, "")).strip().replace(",", ".")
+                    if qty_str.lower() in ["nan", "none", ""]: continue
+                    try:
+                        req_qty = float(qty_str)
+                        if req_qty <= 0: continue
+                    except ValueError:
+                        continue
+                        
+                    # Proovime leida toodet andmebaasist
+                    matched_product = None
+                    if code_val and code_val in code_map: matched_product = code_map[code_val]
+                    elif name_val and name_val in name_map: matched_product = name_map[name_val]
+                    
+                    if matched_product:
+                        prod_id = matched_product.id
+                        # Kui toodet pole veel jooksvas analüüsis, paneme kirja algse seisu
+                        if prod_id not in running_stock:
+                            s_val = stock_by_code.get(matched_product.code, stock_by_name.get(matched_product.name, 0.0))
+                            running_stock[prod_id] = s_val
                             
-                            code_val = str(row.get("Tootekood", "")).strip() if "Tootekood" in df_gs.columns else ""
-                            name_val = str(row.get("Nimetus", "")).strip() if "Nimetus" in df_gs.columns else ""
+                        current_avail = running_stock[prod_id]
+                        deficit = max(0.0, req_qty - current_avail)
+                        
+                        # Vähendame jooksvat jääki (võib minna miinusesse, et teada uut defitsiiti)
+                        running_stock[prod_id] -= req_qty 
+                        
+                        analysis_results.append({
+                            "Nädal": week_val,
+                            "Kood": matched_product.code or "-",
+                            "Nimetus": matched_product.name,
+                            "Vaja (tk/m)": req_qty,
+                            "Laos vaba enne": current_avail,
+                            "Puudu (Telli)": deficit,
+                            "Ühik": matched_product.warehouse_unit
+                        })
+                        
+                        if deficit > 0:
+                            orders_to_create.append({"prod": matched_product, "qty": deficit, "week": week_val})
                             
-                            if code_val.lower() == 'nan': code_val = ""
-                            if name_val.lower() == 'nan': name_val = ""
-                            
-                            matched_product = None
-                            if code_val and code_val in code_map:
-                                matched_product = code_map[code_val]
-                            elif name_val and name_val in name_map:
-                                matched_product = name_map[name_val]
+                    else:
+                        # Toodet ei leitud andmebaasist, näitame ikka aga ilma laoseisuta
+                        analysis_results.append({
+                            "Nädal": week_val,
+                            "Kood": code_val,
+                            "Nimetus": name_val,
+                            "Vaja (tk/m)": req_qty,
+                            "Laos vaba enne": 0.0,
+                            "Puudu (Telli)": req_qty,
+                            "Ühik": "TUNDMATU"
+                        })
+                        
+                df_analysis = pd.DataFrame(analysis_results)
+                
+                # Stiilime tabeli: teeme punaseks need read, mis tuleb reaalselt tellida
+                def highlight_deficit(val):
+                    return 'color: #EF4444; font-weight: 700;' if isinstance(val, (int, float)) and val > 0 else ''
+                
+                if not df_analysis.empty:
+                    st.dataframe(df_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({"Vaja (tk/m)": "{:g}", "Laos vaba enne": "{:g}", "Puudu (Telli)": "{:g}"}), use_container_width=True, hide_index=True, height=500)
+                    
+                    if len(orders_to_create) > 0:
+                        st.warning(f"⚠️ Analüüs näitab, et sul jääb tuleviku vajaduste katmiseks puudu {len(orders_to_create)} artiklit. Vajuta nuppu, et luua neile automaatselt ootel ostutellimused.")
+                        if st.button("🛒 Koosta tellimused PUUDUOLEVATELE kogustele", type="primary", use_container_width=True):
+                            added_orders = 0
+                            for item in orders_to_create:
+                                p = item['prod']
+                                q = item['qty']
                                 
-                            if matched_product:
-                                # Proovime leida tarnija viimase sissetuleku põhjal
+                                # Leiame automaatselt viimase tarnija antud tootele
                                 last_sup_tx = db.query(Transaction.supplier_id).filter(
-                                    Transaction.product_id == matched_product.id,
-                                    Transaction.type == TransactionType.IN_STOCK,
-                                    Transaction.supplier_id.isnot(None)
+                                    Transaction.product_id == p.id, Transaction.type == TransactionType.IN_STOCK, Transaction.supplier_id.isnot(None)
                                 ).order_by(Transaction.transaction_date.desc()).first()
                                 
-                                supplier_id = last_sup_tx[0] if last_sup_tx else None
-                                
                                 new_order = PurchaseOrder(
-                                    product_id=matched_product.id,
-                                    supplier_id=supplier_id,
-                                    quantity=qty,
-                                    price=matched_product.default_price or 0.0,
+                                    product_id=p.id,
+                                    supplier_id=last_sup_tx[0] if last_sup_tx else None,
+                                    quantity=q,
+                                    price=p.default_price or 0.0,
                                     order_date=get_estonian_time().date(),
                                     expected_delivery_date=get_estonian_time().date() + timedelta(days=7)
                                 )
                                 db.add(new_order)
                                 added_orders += 1
-                            else:
-                                error_orders += 1
-                        except Exception:
-                            error_orders += 1
-                            
-                    if added_orders > 0:
-                        db.commit()
-                        msg = f"✅ Edukalt koostatud {added_orders} uut ostutellimust!"
-                        if error_orders > 0:
-                            msg += f" (Hoiatus: {error_orders} rida eirati, kuna toodet ei leitud andmebaasist või kogus oli vigane)."
-                        st.session_state['order_success'] = msg
-                        del st.session_state['gsheet_df']
-                        st.rerun()
+                                
+                            db.commit()
+                            st.session_state['order_success'] = f"✅ Edukalt koostatud {added_orders} uut ostutellimust defitsiidi katteks!"
+                            del st.session_state['gsheet_df']
+                            st.rerun()
                     else:
-                        st.error("⚠️ Ühtegi toodet ei suudetud andmebaasiga siduda. Kontrolli tootekoodide või nimetuste õigsust.")
+                        st.success("✅ Laos on piisavalt kaupa kõikide imporditud vajaduste katmiseks! Uusi tellimusi pole vaja luua.")
 
 def render_inventory(db):
+# ... existing code ...
     st.title("📝 Tootmise inventuur (Kulu kandmine)")
     st.markdown("Lae üles fail, kus on kirjas **tootmisesse alles jäänud** kogused. Süsteem arvutab välja vahe ja kannab puuduoleva osa automaatselt kulusse. Põhilattu midagi tagasi ei kanta.")
     if 'inv_success' in st.session_state: st.success(st.session_state.pop('inv_success'))
