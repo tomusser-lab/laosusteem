@@ -401,8 +401,36 @@ def render_catalog(db):
                 catalog_data.append({**base_dict, "Tarnija": s_name, "Tarnija kood": s_code or "-", "Tarnija toote nimetus": s_prod or "-"})
         
     df_cat = pd.DataFrame(catalog_data)
-    with h_col2: render_excel_download(df_cat, "tootekataloog")
-    st.dataframe(df_cat, use_container_width=True, hide_index=True, height=600)
+    
+    # --- FILTREERIMINE ---
+    with st.expander("🔍 Otsing ja filtrid", expanded=True):
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            f_kood = st.text_input("Tootekood (osaline otsing)")
+        with f2:
+            f_nimi = st.text_input("Nimetus (osaline otsing)")
+        with f3:
+            all_groups = sorted([g for g in df_cat["Tooterühm"].unique() if g and g != "-"])
+            f_grupp = st.multiselect("Tooterühm", options=all_groups)
+        with f4:
+            all_sups = sorted([s for s in df_cat["Tarnija"].unique() if s and s != "-"])
+            f_tarnija = st.multiselect("Tarnija", options=all_sups)
+            
+    filtered_df = df_cat.copy()
+    if f_kood:
+        filtered_df = filtered_df[filtered_df["Tootekood"].str.contains(f_kood, case=False, na=False)]
+    if f_nimi:
+        filtered_df = filtered_df[filtered_df["Nimetus"].str.contains(f_nimi, case=False, na=False)]
+    if f_grupp:
+        filtered_df = filtered_df[filtered_df["Tooterühm"].isin(f_grupp)]
+    if f_tarnija:
+        filtered_df = filtered_df[filtered_df["Tarnija"].isin(f_tarnija)]
+        
+    st.markdown(f"<div style='margin-top: 0.5rem; margin-bottom: -1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:0.9rem;'>Kuvatakse {len(filtered_df)} rida</span></div>", unsafe_allow_html=True)
+    # ----------------------
+
+    with h_col2: render_excel_download(filtered_df, "tootekataloog") # Excel laeb nüüd alla filtreeritud info!
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=600)
 
 def render_transactions(db, is_in_transaction):
     st.title("📥 Sissetulek" if is_in_transaction else "📤 Väljastus ja Tootmisse kandmine")
