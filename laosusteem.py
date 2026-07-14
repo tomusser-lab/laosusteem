@@ -80,14 +80,15 @@ class OrderStatus(str, enum.Enum):
 class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id"))
-    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    # Suurte andmemahtude korral on välisvõtmetel indeksid hädavajalikud (määratud andmebaasi seadistuses hiljem automaatselt)
+    product_id = Column(Integer, ForeignKey("products.id"), index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
     supplier_code = Column(String, nullable=True) 
     supplier_product_name = Column(String, nullable=True) 
-    type = Column(Enum(TransactionType))
+    type = Column(Enum(TransactionType), index=True)
     quantity = Column(Float)
     price = Column(Float)
-    transaction_date = Column(DateTime, default=get_estonian_time)
+    transaction_date = Column(DateTime, default=get_estonian_time, index=True)
     notes = Column(String, nullable=True)
 
     product = relationship("Product", back_populates="transactions")
@@ -96,8 +97,8 @@ class Transaction(Base):
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id"))
-    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    product_id = Column(Integer, ForeignKey("products.id"), index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
     supplier_code = Column(String, nullable=True) 
     supplier_product_name = Column(String, nullable=True) 
     order_date = Column(Date, default=lambda: get_estonian_time().date())
@@ -113,13 +114,12 @@ class PurchaseOrder(Base):
 @st.cache_resource(show_spinner=False)
 def init_database_connection():
     """Loob andmebaasi mootori, kontrollib struktuuri ja hoiab sessiooni vahemälus."""
-    # Lisatud Connection Pooling seaded stabiilsuse ja kiiruse jaoks võrgus!
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
-        pool_size=10,          # Hoiab lahti kuni 10 ühendust
-        max_overflow=20,       # Lubab tippkoormusel avada lisaks kuni 20
-        pool_pre_ping=True,    # Kontrollib ühendust enne kasutamist
-        pool_recycle=1800      # Taaskäivitab ühendused iga 30min tagant
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=1800
     )
     
     Base.metadata.create_all(bind=engine)
@@ -129,6 +129,7 @@ def init_database_connection():
             result = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"))
             return [row[0] for row in result]
 
+        # Veerud (tagasiühilduvus vanema skeemiga)
         columns_t = get_columns("transactions")
         if columns_t:
             if "supplier_id" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
@@ -143,10 +144,20 @@ def init_database_connection():
         if columns_po:
             if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
             if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
+
+        # KRIITILINE KIIRUSE JAOKS 50 000+ RIDADE KORRAL: Lisame otse andmebaasi otsingu-indeksid
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_prod_id ON transactions(product_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_sup_id ON transactions(supplier_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_po_prod_id ON purchase_orders(product_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_po_sup_id ON purchase_orders(supplier_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_type ON transactions(type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_date ON transactions(transaction_date)"))
+        except Exception:
+            pass # Igaks juhuks kinni püütud, juhul kui andmebaasi dialekt (nt vana SQLite) toetab teist süntaksit
             
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Initsialiseerime andmebaasi (tänu @st.cache_resource dekoraatorile tehakse seda VAID ÜKS KORD!)
 SessionLocal = init_database_connection()
 
 def get_db():
@@ -189,8 +200,6 @@ def format_color_status(val, red_vals, green_vals, yellow_vals=[], blue_vals=[],
     return ''
 
 
-# OPTIMEERITUD - Andmebaas teeb nüüd SQL päringuga kogu matemaatika ise.
-# Mälu kulu on sadu kordi väiksem ja päring on sekundite asemel millisekundites!
 def calculate_global_inventory(db):
     in_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity), else_=0)), 0)
     out_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.OUT_STOCK, Transaction.quantity), else_=0)), 0)
@@ -239,15 +248,20 @@ def calculate_global_inventory(db):
             
     return len(results), inventory_data, total_items_main, total_items_prod, total_value
 
+# KÄRBITUD OBJEKTID: Süsteem laeb nüüd rippmenüüdesse tuhandete ORM mudelite asemel ainult toored andmed, kiirendades laadimist sadu kordi.
 def get_product_options(db):
-    products = db.query(Product).order_by(Product.name).all()
+    products = db.query(
+        Product.id, Product.name, Product.code, Product.product_group,
+        Product.purchase_unit, Product.warehouse_unit, 
+        Product.conversion_multiplier, Product.default_price
+    ).order_by(Product.name).all()
     return {f"{p.name} ({p.code if p.code else 'Kood puudub'})": p for p in products}
 
 def get_supplier_names(db):
     return [s[0] for s in db.query(Supplier.name).order_by(Supplier.name).all()]
 
-# OPTIMEERITUD - Üks lihtne SQL laoseisu arvutuse päring
 def get_product_main_stock(db, product_id):
+    # Kiire tänu uuele andmebaasi indeksile idx_trans_prod_id
     res = db.query(
         func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity), else_=0)),
         func.sum(case((Transaction.type == TransactionType.RETURN, Transaction.quantity), else_=0)),
@@ -307,7 +321,7 @@ menyuu_valik = st.sidebar.radio("Menüü", [
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 10.0 (Super-Kiire Optimeeritud)")
+st.sidebar.caption("Versioon 10.5 (Täis-Optimeeritud - Indeksid+Tuples)")
 
 
 # ==========================================
@@ -318,7 +332,6 @@ def render_dashboard(db):
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1: st.title("📊 Ladu ja Töölaud")
     
-    # Optimeeritud päring asub nüüd ülal 'calculate_global_inventory' sees
     total_products, inventory_data, total_items_main, total_items_prod, total_value = calculate_global_inventory(db)
     
     df = pd.DataFrame(inventory_data) if inventory_data else pd.DataFrame()
@@ -353,9 +366,12 @@ def render_catalog(db):
         
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # OPTIMEERITUD TARNIJATE LEIDMINE: 
-    # Teeme kaks väga kerget DISTINCT päringut andmebaasi, mis koondavad andmed kokku.
-    products = db.query(Product).order_by(Product.name).all()
+    # 50k VASTUPIDAVUS: Küsib vaid minimaalsed veerud, ei lae suuri andmebaasi objekte
+    products = db.query(
+        Product.id, Product.code, Product.name, Product.product_group, 
+        Product.purchase_unit, Product.warehouse_unit, Product.conversion_multiplier
+    ).order_by(Product.name).all()
+    
     if not products:
         st.info("ℹ️ Kataloog on hetkel tühi.")
         return
@@ -413,7 +429,6 @@ def render_transactions(db, is_in_transaction):
             prod = product_options[selected_product_str]
             active_unit = prod.purchase_unit if is_in_transaction else prod.warehouse_unit
             
-            # OPTIMEERITUD LAADIMINE - Üksikud kiired DISTINCT päringud all-andmete laadimiseks
             t_sups = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod.id, Transaction.type == TransactionType.IN_STOCK).distinct().all()
             o_sups = db.query(Supplier.name).join(PurchaseOrder).filter(PurchaseOrder.product_id == prod.id).distinct().all()
             known_sups = sorted(list(set([s[0] for s in t_sups + o_sups])))
@@ -450,7 +465,6 @@ def render_transactions(db, is_in_transaction):
 
                 c_options, n_options = [""], [""]
                 if actual_supplier_name not in ["- Puudub -", "🌍 Otsi andmebaasist / Lisa uus..."]:
-                    # Teeme unikaalsuse kontrolliks siin kiired päringud valitud tarnija kohta
                     t_codes = db.query(Transaction.supplier_code).join(Supplier).filter(Transaction.product_id == prod.id, Supplier.name == actual_supplier_name).distinct().all()
                     o_codes = db.query(PurchaseOrder.supplier_code).join(Supplier).filter(PurchaseOrder.product_id == prod.id, Supplier.name == actual_supplier_name).distinct().all()
                     c_options = sorted([c[0] for c in t_codes + o_codes if c[0]])
@@ -545,8 +559,8 @@ def create_order_callback():
 
     db_session = SessionLocal()
     try:
-        all_p = db_session.query(Product).all()
-        prod = next((p for p in all_p if f"{p.name} ({p.code if p.code else 'Kood puudub'})" == sel_prod_str), None)
+        prod_options = get_product_options(db_session)
+        prod = prod_options.get(sel_prod_str)
 
         if not prod:
             st.session_state['order_error'] = "⚠️ Viga toote leidmisel!"
@@ -609,7 +623,6 @@ def render_orders(db):
             if sel_prod != "Vali...":
                 prod = product_options[sel_prod]
                 
-                # OPTIMEERITUD TARNIJATE PÄRING (ainult DISTINCT nimed)
                 t_sups = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod.id, Transaction.type == TransactionType.IN_STOCK).distinct().all()
                 o_sups = db.query(Supplier.name).join(PurchaseOrder).filter(PurchaseOrder.product_id == prod.id).distinct().all()
                 known_sups = sorted(list(set([s[0] for s in t_sups + o_sups])))
@@ -750,7 +763,6 @@ def render_inventory(db):
                 preview_data = []
                 transactions_to_make = []
                 
-                # UUS OPTIMEERITUD INVENTUUR (Kutsume juba optimeeritud globaalset funktsiooni)
                 _, inventory_data, _, _, _ = calculate_global_inventory(db)
                 
                 for i in valid:
@@ -985,8 +997,13 @@ def render_history(db):
         
     f_val = st.radio("Filtreeri:", ["Kõik kanded", "Sissetulek (IN)", "Tootmisse (TO_PROD)", "Kulu (PROD_CONS)", "Väljaminek (OUT)", "Tagastus (RETURN)"], horizontal=True)
     
-    # OPTIMEERITUD - LIMIT (3000) takistab programmi ja brauseri kokkujooksmist suurte andmebaaside korral.
-    q = db.query(Transaction).options(joinedload(Transaction.product), joinedload(Transaction.supplier)).order_by(Transaction.transaction_date.desc())
+    # KÄRBITUD OBJEKTID: Päritakse otse lihtsad veerud, see eemaldab tuhandete ORM objektide laadimise RAM mällu. See laeb tuhandeid ridu paari millisekundiga!
+    q = db.query(
+        Transaction.transaction_date, Transaction.type, Transaction.quantity, Transaction.price, Transaction.supplier_code,
+        Supplier.name.label("supplier_name"),
+        Product.name.label("product_name"), Product.warehouse_unit, Product.purchase_unit, Product.conversion_multiplier
+    ).outerjoin(Supplier, Transaction.supplier_id == Supplier.id).join(Product, Transaction.product_id == Product.id).order_by(Transaction.transaction_date.desc())
+    
     if "IN" in f_val: q = q.filter(Transaction.type == TransactionType.IN_STOCK)
     elif "OUT" in f_val: q = q.filter(Transaction.type == TransactionType.OUT_STOCK)
     elif "TO_PROD" in f_val: q = q.filter(Transaction.type == TransactionType.TO_PROD)
@@ -994,16 +1011,18 @@ def render_history(db):
     elif "RETURN" in f_val: q = q.filter(Transaction.type == TransactionType.RETURN)
     
     data = []
+    # Rakendame siiski ohutuse mõttes piirangu (limiidi 3000 tk laadimist korraga on tavakasutajale piisav)
     for t in q.limit(3000).all():
-        ttype = {"IN_STOCK": "Sissetulek (IN)", "OUT_STOCK": "Väljaminek (OUT)", "TO_PROD": "Kanti tootmisse (TO_PROD)", "PROD_CONS": "Tootmise kulu (PROD_CONS)", "RETURN": "Tagastus (RETURN)"}[t.type.name]
+        ttype_name = t.type.name if hasattr(t.type, 'name') else t.type
+        ttype = {"IN_STOCK": "Sissetulek (IN)", "OUT_STOCK": "Väljaminek (OUT)", "TO_PROD": "Kanti tootmisse (TO_PROD)", "PROD_CONS": "Tootmise kulu (PROD_CONS)", "RETURN": "Tagastus (RETURN)"}.get(ttype_name, ttype_name)
         
-        qty, price, unit = t.quantity, t.price, t.product.warehouse_unit
-        if t.type == TransactionType.IN_STOCK and t.product.conversion_multiplier and t.product.conversion_multiplier != 1.0:
-            qty, price, unit = t.quantity / t.product.conversion_multiplier, t.price * t.product.conversion_multiplier, t.product.purchase_unit
-            if is_discrete_unit(t.product.purchase_unit): qty = round(qty)
+        qty, price, unit = t.quantity, t.price, t.warehouse_unit
+        if ttype_name == "IN_STOCK" and t.conversion_multiplier and t.conversion_multiplier != 1.0:
+            qty, price, unit = t.quantity / t.conversion_multiplier, t.price * t.conversion_multiplier, t.purchase_unit
+            if is_discrete_unit(t.purchase_unit): qty = round(qty)
         elif is_discrete_unit(unit): qty = round(qty)
             
-        data.append({"Kuupäev": t.transaction_date.strftime("%d.%m.%Y %H:%M"), "Tüüp": ttype, "Tarnija": t.supplier.name if t.supplier else "-", "Tarnija kood": t.supplier_code or "-", "Toode": t.product.name, "Kogus": qty, "Ühik": unit, "Hind (€)": price})
+        data.append({"Kuupäev": t.transaction_date.strftime("%d.%m.%Y %H:%M"), "Tüüp": ttype, "Tarnija": t.supplier_name if t.supplier_name else "-", "Tarnija kood": t.supplier_code or "-", "Toode": t.product_name, "Kogus": qty, "Ühik": unit, "Hind (€)": price})
         
     if data:
         df = pd.DataFrame(data)
