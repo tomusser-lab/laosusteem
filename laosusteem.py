@@ -39,8 +39,14 @@ if not check_password():
 # ==========================================
 # 1. ANDMEBAASI SEADISTUS (SQLite)
 # ==========================================
-SQLALCHEMY_DATABASE_URL = "sqlite:///./laosusteem.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# ==========================================
+# 1. ANDMEBAASI SEADISTUS (Supabase / PostgreSQL)
+# ==========================================
+# Loeme andmebaasi URL-i turvaliselt Streamliti saladustest
+SQLALCHEMY_DATABASE_URL = st.secrets["SUPABASE_URL"]
+
+# PostgreSQL ei vaja 'check_same_thread' argumenti
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -123,28 +129,31 @@ class PurchaseOrder(Base):
 Base.metadata.create_all(bind=engine)
 
 # ==========================================
-# AUTOMAATNE MIGRATSIOON
+# AUTOMAATNE MIGRATSIOON (PostgreSQL tugi)
 # ==========================================
 with engine.begin() as conn:
+    def get_columns(table_name):
+        # PostgreSQL päring veergude leidmiseks
+        result = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"))
+        return [row[0] for row in result]
+
     # Transactions
-    result = conn.execute(text("PRAGMA table_info(transactions)"))
-    columns = [row[1] for row in result]
-    if "supplier_id" not in columns: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
-    if "supplier_code" not in columns: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_code VARCHAR"))
-    if "supplier_product_name" not in columns: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_product_name VARCHAR"))
+    columns_t = get_columns("transactions")
+    if columns_t:
+        if "supplier_id" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
+        if "supplier_code" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_code VARCHAR"))
+        if "supplier_product_name" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_product_name VARCHAR"))
         
     # Products
-    result_p = conn.execute(text("PRAGMA table_info(products)"))
-    columns_p = [row[1] for row in result_p]
-    if "conversion_multiplier" not in columns_p: conn.execute(text("ALTER TABLE products ADD COLUMN conversion_multiplier FLOAT DEFAULT 1.0"))
+    columns_p = get_columns("products")
+    if columns_p:
+        if "conversion_multiplier" not in columns_p: conn.execute(text("ALTER TABLE products ADD COLUMN conversion_multiplier FLOAT DEFAULT 1.0"))
         
     # Purchase Orders
-    result_po = conn.execute(text("PRAGMA table_info(purchase_orders)"))
-    columns_po = [row[1] for row in result_po]
+    columns_po = get_columns("purchase_orders")
     if columns_po:
         if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
         if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
-
 # ==========================================
 # 2. ABIFUNKTSIOONID JA MATEMAATIKA
 # ==========================================
