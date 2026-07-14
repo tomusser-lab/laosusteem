@@ -760,7 +760,7 @@ def render_orders(db):
         
     with tab_gsheets:
         st.markdown("Tõmba **ostuvajadused** automaatselt Google Sheetsist ja loo nendest süsteemis ootel tellimused.")
-        st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Jagamise seadetes: *\"Kõik, kellel on link, saavad vaadata\"*).\n2. Tabelis peavad olema veerud **Nimetus** (või Tootekood) ja **Kogus**.")
+        st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Jagamise seadetes: *\"Kõik, kellel on link, saavad vaadata\"*).\n2. Tabelis peavad olema veerud **Nimetus** (või Tootekood) ja **Kogus**.\n3. Kui soovid andmeid kindlalt vahelehelt (sheet), kopeeri link **olles ise sel vahelehel** (link peab lõppema `gid=...`).")
         
         gsheet_url = st.text_input("Kleebi Google Sheetsi avalik link siia:")
         
@@ -769,10 +769,18 @@ def render_orders(db):
                 st.error("Palun kleebi link enne tõmbamist!")
             else:
                 try:
-                    # Muudame tavalise lingi csv allalaadimise lingiks
+                    # Muudame tavalise lingi csv allalaadimise lingiks, arvestades ka GID-i (konkreetse sheet'i ID)
                     csv_url = gsheet_url
                     if "/edit" in gsheet_url:
-                        csv_url = gsheet_url.split("/edit")[0] + "/export?format=csv"
+                        base_url = gsheet_url.split("/edit")[0]
+                        # Otsime, kas URL-is on gid parameeter
+                        gid_param = ""
+                        if "gid=" in gsheet_url:
+                            # Eraldame gid väärtuse
+                            gid_val = gsheet_url.split("gid=")[1].split("&")[0]
+                            gid_param = f"&gid={gid_val}"
+                            
+                        csv_url = f"{base_url}/export?format=csv{gid_param}"
                         
                     df_gs = pd.read_csv(csv_url, dtype=str)
                     st.session_state['gsheet_df'] = df_gs
