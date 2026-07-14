@@ -7,16 +7,15 @@ import pandas as pd
 import enum
 import io
 
-# --- UUS: LEHE SEADISTUS JA SISSELOGIMINE ---
+# --- LEHE SEADISTUS JA SISSELOGIMINE ---
 st.set_page_config(page_title="Nutikas Laosüsteem", page_icon="📦", layout="wide", initial_sidebar_state="expanded")
 
 def check_password():
     """Kontrollib, kas kasutaja on õige parooli sisestanud."""
     def password_entered():
-        # Võrdleb sisestatud parooli Streamlit Secretsis oleva parooliga
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Kustutame parooli turvalisuse mõttes mälust
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
@@ -25,7 +24,6 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         st.markdown("<br><br><h1 style='text-align: center;'>🔒 Turvaline ligipääs</h1>", unsafe_allow_html=True)
-        # Teeme kasti keskele
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.text_input("Palun sisesta laosüsteemi parool:", type="password", on_change=password_entered, key="password")
@@ -34,22 +32,18 @@ def check_password():
         return False
     return True
 
-# Kui parool on vale või sisestamata, siis siit edasi süsteemi ei laeta!
 if not check_password():
     st.stop()
-# ==========================================
-# 1. ANDMEBAASI SEADISTUS (Supabase / PostgreSQL)
-# ==========================================
-# Loeme andmebaasi URL-i turvaliselt Streamliti saladustest
-SQLALCHEMY_DATABASE_URL = st.secrets["SUPABASE_URL"]
 
-# PostgreSQL ei vaja 'check_same_thread' argumenti
+# ==========================================
+# 1. ANDMEBAASI SEADISTUS
+# ==========================================
+SQLALCHEMY_DATABASE_URL = st.secrets["SUPABASE_URL"]
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def get_estonian_time():
-    """Tagastab alati õige Eesti aja, eemaldades ajavööndi info SQLite jaoks."""
     return datetime.now(ZoneInfo("Europe/Tallinn")).replace(tzinfo=None)
 
 def get_db():
@@ -126,45 +120,36 @@ class PurchaseOrder(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# ==========================================
-# AUTOMAATNE MIGRATSIOON (PostgreSQL tugi)
-# ==========================================
 with engine.begin() as conn:
     def get_columns(table_name):
-        # PostgreSQL päring veergude leidmiseks
         result = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"))
         return [row[0] for row in result]
 
-    # Transactions
     columns_t = get_columns("transactions")
     if columns_t:
         if "supplier_id" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"))
         if "supplier_code" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_code VARCHAR"))
         if "supplier_product_name" not in columns_t: conn.execute(text("ALTER TABLE transactions ADD COLUMN supplier_product_name VARCHAR"))
         
-    # Products
     columns_p = get_columns("products")
     if columns_p:
         if "conversion_multiplier" not in columns_p: conn.execute(text("ALTER TABLE products ADD COLUMN conversion_multiplier FLOAT DEFAULT 1.0"))
         
-    # Purchase Orders
     columns_po = get_columns("purchase_orders")
     if columns_po:
         if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
         if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
 
 # ==========================================
-# 2. ABIFUNKTSIOONID JA MATEMAATIKA
+# 2. ABIFUNKTSIOONID JA OPTIMEERITUD PÄRINGUD
 # ==========================================
 def convert_df_to_excel(df):
-    """Genereerib pandas DataFrame'ist Excel faili mälus."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Andmed')
     return output.getvalue()
 
 def render_excel_download(df, prefix="andmed"):
-    """Vormistab standardse Exceli allalaadimise nupu."""
     st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
     st.download_button(
         label="📥 Laadi alla Excel (xlsx)",
@@ -175,12 +160,10 @@ def render_excel_download(df, prefix="andmed"):
     )
 
 def is_discrete_unit(unit_str):
-    """Kontrollib, kas ühik on selline, mis vajab alati täisarvuks ümardamist."""
     if not unit_str: return False
     return unit_str.strip().lower() in ['tk', 'tükk', 'komplekt', 'paar']
 
 def format_color_status(val, red_vals, green_vals, yellow_vals=[], blue_vals=[], purple_vals=[]):
-    """Dünaamiline CSS värvija Dataframe rakkudele."""
     if val in green_vals: return 'color: #10B981; font-weight: 700;'
     if val in red_vals: return 'color: #EF4444; font-weight: 700;'
     if val in yellow_vals: return 'color: #F59E0B; font-weight: 700;'
@@ -188,25 +171,15 @@ def format_color_status(val, red_vals, green_vals, yellow_vals=[], blue_vals=[],
     if val in purple_vals: return 'color: #8B5CF6; font-weight: 700;'
     return ''
 
+# OPTIMEERITUD: See funktsioon ei lae enam tarbetult sisse tarnijaid ega tellimusi!
 def calculate_global_inventory(db):
-    """Arvutab kogu laoseisu optimeeritud päringutega (N+1 lahendatud joinedload abil)."""
-    all_products = db.query(Product).options(
-        joinedload(Product.transactions).joinedload(Transaction.supplier),
-        joinedload(Product.purchase_orders).joinedload(PurchaseOrder.supplier)
-    ).all()
+    all_products = db.query(Product).options(joinedload(Product.transactions)).all()
     
-    all_suppliers = db.query(Supplier).order_by(Supplier.name).all()
-    supplier_names = [s.name for s in all_suppliers]
-    product_options = {f"{p.name} ({p.code if p.code else 'Kood puudub'})": p for p in all_products}
-    
-    total_items_main = 0
-    total_items_prod = 0
-    total_value = 0.0
+    total_items_main, total_items_prod, total_value = 0, 0, 0.0
     inventory_data = []
 
     for p in all_products:
-        in_qty, out_qty, ret_qty, to_prod_qty, prod_cons_qty = 0, 0, 0, 0, 0
-        total_in_cost = 0.0
+        in_qty, out_qty, ret_qty, to_prod_qty, prod_cons_qty, total_in_cost = 0, 0, 0, 0, 0, 0.0
         
         for t in p.transactions:
             if t.type == TransactionType.IN_STOCK:
@@ -242,7 +215,24 @@ def calculate_global_inventory(db):
                 "Koguväärtus (€)": (main_stock + prod_stock) * avg_price
             })
             
-    return all_products, product_options, supplier_names, inventory_data, total_items_main, total_items_prod, total_value
+    return all_products, inventory_data, total_items_main, total_items_prod, total_value
+
+# OPTIMEERITUD: Lihtsad laadijad menüüde jaoks (kiired)
+def get_product_options(db):
+    products = db.query(Product).order_by(Product.name).all()
+    return {f"{p.name} ({p.code if p.code else 'Kood puudub'})": p for p in products}
+
+def get_supplier_names(db):
+    return [s.name for s in db.query(Supplier).order_by(Supplier.name).all()]
+
+def get_product_main_stock(db, product_id):
+    """Leiab väga kiiresti vaid ühe toote põhilao seisu (müügi kontrolliks)."""
+    trans = db.query(Transaction).filter(Transaction.product_id == product_id).all()
+    in_qty = sum(t.quantity for t in trans if t.type == TransactionType.IN_STOCK)
+    ret_qty = sum(t.quantity for t in trans if t.type == TransactionType.RETURN)
+    out_qty = sum(t.quantity for t in trans if t.type == TransactionType.OUT_STOCK)
+    to_prod = sum(t.quantity for t in trans if t.type == TransactionType.TO_PROD)
+    return (in_qty + ret_qty) - out_qty - to_prod
 
 # ==========================================
 # 3. KASUTAJALIIDESE SEADISTUS JA MENÜÜ
@@ -287,20 +277,22 @@ st.sidebar.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Parandatud tühja labeli viga (anname labeli aga peidame ära)
 menyuu_valik = st.sidebar.radio("Menüü", [
     "📊 Ladu ja Töölaud", "📋 Tootekataloog", "📥 Sissetulek", "📤 Väljastus / Tootmine", 
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 9.4 (Täislahendus & Massimport)")
+st.sidebar.caption("Versioon 9.5 (Optimeeritud & Välkkiire)")
 
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
 # ==========================================
-def render_dashboard():
+def render_dashboard(db):
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1: st.title("📊 Ladu ja Töölaud")
+    
+    # Siin lehel laeme reaalselt raske lao matemaatika!
+    all_products, inventory_data, total_items_main, total_items_prod, total_value = calculate_global_inventory(db)
     
     df = pd.DataFrame(inventory_data) if inventory_data else pd.DataFrame()
     if not df.empty:
@@ -326,19 +318,26 @@ def render_dashboard():
     else:
         st.info("ℹ️ Ladu on hetkel tühi. Lisa vasakult menüüst uusi tooteid ja tee sissekandeid.")
 
-def render_catalog():
+def render_catalog(db):
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1:
         st.title("📋 Tootekataloog")
         st.markdown("Siin on nimekiri kõikidest andmebaasi registreeritud toodetest koos seotud tarnijatega.")
         
     st.markdown("<br>", unsafe_allow_html=True)
-    if not all_products:
+    
+    # Tõmbame andmebaasist ainult vajaliku kataloogi info
+    catalog_products = db.query(Product).options(
+        joinedload(Product.transactions).joinedload(Transaction.supplier),
+        joinedload(Product.purchase_orders).joinedload(PurchaseOrder.supplier)
+    ).all()
+    
+    if not catalog_products:
         st.info("ℹ️ Kataloog on hetkel tühi.")
         return
 
     catalog_data = []
-    for p in all_products:
+    for p in catalog_products:
         unique_suppliers = set()
         for t in p.transactions:
             if t.type == TransactionType.IN_STOCK and t.supplier: unique_suppliers.add((t.supplier.name, t.supplier_code, t.supplier_product_name))
@@ -358,7 +357,7 @@ def render_catalog():
     with h_col2: render_excel_download(df_cat, "tootekataloog")
     st.dataframe(df_cat, use_container_width=True, hide_index=True, height=600)
 
-def render_transactions(is_in_transaction):
+def render_transactions(db, is_in_transaction):
     st.title("📥 Sissetulek" if is_in_transaction else "📤 Väljastus ja Tootmisse kandmine")
     if is_in_transaction: st.markdown("Registreeri lattu sissetulev kaup. Täida info **ostuühikutes**.")
     else: st.markdown("Määra, kas kannad kauba **Tootmisse** või teed **Tavalise väljamineku** (nt müük).")
@@ -377,16 +376,24 @@ def render_transactions(is_in_transaction):
     col1, col2 = st.columns([2, 1]) 
     with col1:
         with st.container():
+            # Laeme valikud optimeeritult
+            product_options = get_product_options(db)
             selected_product_str = st.selectbox("Otsi toodet oma kataloogist", options=["Vali toode..."] + list(product_options.keys()))
             
-            if selected_product_str == "Vali toode...": return # Ootame valikut
+            if selected_product_str == "Vali toode...": return
             
             prod = product_options[selected_product_str]
             active_unit = prod.purchase_unit if is_in_transaction else prod.warehouse_unit
             
-            # Kogu varasemad tarnijad (Optimeeritud otsing mälust)
-            known_sups = sorted(list(set([t.supplier.name for t in prod.transactions if t.type == TransactionType.IN_STOCK and t.supplier] + [o.supplier.name for o in prod.purchase_orders if o.supplier])))
-            last_sup_name = next((t.supplier.name for t in sorted(prod.transactions, key=lambda x: x.transaction_date, reverse=True) if t.type == TransactionType.IN_STOCK and t.supplier), None)
+            # Laeme sellele tootele spetsiifilised seosed jooksvalt
+            # Nii me ei koorma mälu asjadega, mida ei vajata!
+            db_prod_full = db.query(Product).options(
+                joinedload(Product.transactions).joinedload(Transaction.supplier),
+                joinedload(Product.purchase_orders).joinedload(PurchaseOrder.supplier)
+            ).filter(Product.id == prod.id).first()
+            
+            known_sups = sorted(list(set([t.supplier.name for t in db_prod_full.transactions if t.type == TransactionType.IN_STOCK and t.supplier] + [o.supplier.name for o in db_prod_full.purchase_orders if o.supplier])))
+            last_sup_name = next((t.supplier.name for t in sorted(db_prod_full.transactions, key=lambda x: x.transaction_date, reverse=True) if t.type == TransactionType.IN_STOCK and t.supplier), None)
 
             st.markdown("<br>", unsafe_allow_html=True)
             f_col1, f_col2 = st.columns(2)
@@ -407,6 +414,7 @@ def render_transactions(is_in_transaction):
                 actual_supplier_name = supplier_choice
                 
                 if supplier_choice == "🌍 Otsi andmebaasist / Lisa uus...":
+                    supplier_names = get_supplier_names(db)
                     other_sups = sorted(list(set(supplier_names) - set(known_sups)))
                     db_sup_choice = st.selectbox("Otsi olemasolevat tarnijat süsteemist", options=["➕ Sisesta uus tarnija..."] + other_sups)
                     if db_sup_choice == "➕ Sisesta uus tarnija...":
@@ -416,8 +424,8 @@ def render_transactions(is_in_transaction):
 
                 c_options, n_options = [""], [""]
                 if actual_supplier_name not in ["- Puudub -", "🌍 Otsi andmebaasist / Lisa uus..."]:
-                    c_options = sorted(list(set([t.supplier_code for t in prod.transactions if t.supplier and t.supplier.name == actual_supplier_name and t.supplier_code] + [o.supplier_code for o in prod.purchase_orders if o.supplier and o.supplier.name == actual_supplier_name and o.supplier_code])))
-                    n_options = sorted(list(set([t.supplier_product_name for t in prod.transactions if t.supplier and t.supplier.name == actual_supplier_name and t.supplier_product_name] + [o.supplier_product_name for o in prod.purchase_orders if o.supplier and o.supplier.name == actual_supplier_name and o.supplier_product_name])))
+                    c_options = sorted(list(set([t.supplier_code for t in db_prod_full.transactions if t.supplier and t.supplier.name == actual_supplier_name and t.supplier_code] + [o.supplier_code for o in db_prod_full.purchase_orders if o.supplier and o.supplier.name == actual_supplier_name and o.supplier_code])))
+                    n_options = sorted(list(set([t.supplier_product_name for t in db_prod_full.transactions if t.supplier and t.supplier.name == actual_supplier_name and t.supplier_product_name] + [o.supplier_product_name for o in db_prod_full.purchase_orders if o.supplier and o.supplier.name == actual_supplier_name and o.supplier_product_name])))
                 
                 sc_col1, sc_col2 = st.columns(2)
                 with sc_col1:
@@ -448,9 +456,8 @@ def handle_transaction_save(db, prod, qty, price, notes, is_in, action_type, act
             ex_sup = db.query(Supplier).filter(Supplier.name == act_sup_name).first()
             if ex_sup: final_sup_id = ex_sup.id
     else:
-        # Väljastuse kontroll
-        stock_data = next((d for d in inventory_data if d["Tootekood"] == prod.code and d["Nimetus"] == prod.name), None)
-        curr_stock = stock_data["Põhiladu"] if stock_data else 0.0
+        # Kiire, otse andmebaasi tehtav laoseisu kontroll väljastamisel
+        curr_stock = get_product_main_stock(db, prod.id)
         if qty > curr_stock:
             st.session_state['trans_error'] = f"⚠️ Viga: PÕHILAOS on saadaval ainult: {curr_stock:g} {prod.warehouse_unit}"
             proceed = False
@@ -477,7 +484,6 @@ def handle_transaction_save(db, prod, qty, price, notes, is_in, action_type, act
         st.rerun()
 
 def create_order_callback():
-    """Loome uue tellimuse ja puhastame mälu (session_state) ilma vahekaarte sulgemata."""
     sel_prod_str = st.session_state.get("new_ord_prod")
 
     if not sel_prod_str or sel_prod_str == "Vali...":
@@ -568,10 +574,17 @@ def render_orders(db):
     with tab_new:
         col1, _ = st.columns([2, 1])
         with col1:
+            product_options = get_product_options(db)
             sel_prod = st.selectbox("Vali toode", options=["Vali..."] + list(product_options.keys()), key="new_ord_prod")
             if sel_prod != "Vali...":
                 prod = product_options[sel_prod]
-                known_sups = sorted(list(set([t.supplier.name for t in prod.transactions if t.type == TransactionType.IN_STOCK and t.supplier] + [o.supplier.name for o in prod.purchase_orders if o.supplier])))
+                
+                db_prod_full = db.query(Product).options(
+                    joinedload(Product.transactions).joinedload(Transaction.supplier),
+                    joinedload(Product.purchase_orders).joinedload(PurchaseOrder.supplier)
+                ).filter(Product.id == prod.id).first()
+                
+                known_sups = sorted(list(set([t.supplier.name for t in db_prod_full.transactions if t.type == TransactionType.IN_STOCK and t.supplier] + [o.supplier.name for o in db_prod_full.purchase_orders if o.supplier])))
                 
                 f1, f2 = st.columns(2)
                 with f1: st.number_input(f"Kogus ({prod.purchase_unit})", min_value=0.001, value=1.0, key="new_ord_qty")
@@ -580,6 +593,7 @@ def render_orders(db):
                 o_sup_ch = st.selectbox("Tarnija", options=["- Puudub -"] + known_sups + ["🌍 Otsi andmebaasist..."], key="new_ord_sup_ch")
                 act_sup = o_sup_ch
                 if o_sup_ch == "🌍 Otsi andmebaasist...":
+                    supplier_names = get_supplier_names(db)
                     db_sup = st.selectbox("Otsi olemasolevat", options=["➕ Uus tarnija..."] + sorted(list(set(supplier_names)-set(known_sups))), key="new_ord_db_sup")
                     if db_sup == "➕ Uus tarnija...":
                         st.text_input("Uue tarnija nimi", key="new_ord_n_sup")
@@ -588,8 +602,8 @@ def render_orders(db):
                         
                 c_opt, n_opt = [""], [""]
                 if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
-                    c_opt = sorted(list(set([t.supplier_code for t in prod.transactions if t.supplier and t.supplier.name == act_sup and t.supplier_code] + [o.supplier_code for o in prod.purchase_orders if o.supplier and o.supplier.name == act_sup and o.supplier_code])))
-                    n_opt = sorted(list(set([t.supplier_product_name for t in prod.transactions if t.supplier and t.supplier.name == act_sup and t.supplier_product_name] + [o.supplier_product_name for o in prod.purchase_orders if o.supplier and o.supplier.name == act_sup and o.supplier_product_name])))
+                    c_opt = sorted(list(set([t.supplier_code for t in db_prod_full.transactions if t.supplier and t.supplier.name == act_sup and t.supplier_code] + [o.supplier_code for o in db_prod_full.purchase_orders if o.supplier and o.supplier.name == act_sup and o.supplier_code])))
+                    n_opt = sorted(list(set([t.supplier_product_name for t in db_prod_full.transactions if t.supplier and t.supplier.name == act_sup and t.supplier_product_name] + [o.supplier_product_name for o in db_prod_full.purchase_orders if o.supplier and o.supplier.name == act_sup and o.supplier_product_name])))
                 
                 sc1, sc2 = st.columns(2)
                 with sc1:
@@ -703,11 +717,13 @@ def render_inventory(db):
                 preview_data = []
                 transactions_to_make = []
                 
+                # Arvutame inventuuri faili laadimisel inventuuri seisu jookvalt
+                _, inventory_data, _, _, _ = calculate_global_inventory(db)
+                
                 for i in valid:
                     p = i['prod']
                     left_qty = round(i['left_qty']) if is_discrete_unit(p.warehouse_unit) else i['left_qty']
                     
-                    # Leiame toote seisu otse TÖÖLAUA andmetest, et tagada 100% sünkroonsus
                     search_code = p.code or "-"
                     stock_info = next((item for item in inventory_data if item["Tootekood"] == search_code), None)
                     if not stock_info:
@@ -804,6 +820,7 @@ def render_product_management(db):
         
     with t2:
         with st.columns([2,1])[0]:
+            product_options = get_product_options(db)
             sel = st.selectbox("Otsi toodet", ["Vali..."] + list(product_options.keys()))
             if sel != "Vali...": prod_form(product_options[sel], key="edit")
             
@@ -858,87 +875,89 @@ def render_product_management(db):
                     st.dataframe(df_upload, use_container_width=True, hide_index=True)
                     
                     if st.button("💾 Salvesta tooted andmebaasi", type="primary", use_container_width=True):
-                        # Lisatud SPINNER, et süsteem annaks kasutajale visuaalselt märku laadimisest!
                         with st.spinner("Salvestan andmeid andmebaasi, palun oota..."):
                             added_count = 0
                             error_count = 0
                             
                             try:
+                                existing_codes = {p.code for p in db.query(Product.code).filter(Product.code.isnot(None)).all()}
+                                existing_names_groups = {(p.name, p.product_group) for p in db.query(Product.name, Product.product_group).all()}
+                                supplier_map = {s.name: s for s in db.query(Supplier).all()}
+
+                                def parse_float(val, default_val=0.0):
+                                    if pd.isna(val): return default_val
+                                    val_str = str(val).strip().lower()
+                                    if val_str in ['nan', 'none', 'null', '']: return default_val
+                                    try: return float(val_str.replace(',', '.'))
+                                    except (ValueError, TypeError): return default_val
+
+                                def parse_str(val):
+                                    if pd.isna(val): return None
+                                    val_str = str(val).strip()
+                                    if val_str.lower() in ['nan', 'none', 'null', '']: return None
+                                    return val_str
+
                                 for _, row in df_upload.iterrows():
-                                    # TOOTE ANDMED
-                                    name = str(row.get("Nimetus", "")).strip()
-                                    if not name or name.lower() == 'nan':
-                                        continue
+                                    name = parse_str(row.get("Nimetus"))
+                                    if not name: continue
                                         
-                                    code = str(row.get("Kood", "")).strip() if pd.notna(row.get("Kood")) else None
-                                    if code and code.lower() == 'nan': code = None
-                                    
-                                    group = str(row.get("Rühm", "")).strip() if pd.notna(row.get("Rühm")) else None
-                                    if group and group.lower() == 'nan': group = None
-                                        
-                                    price = float(row.get("Baashind (€)", 0.0)) if pd.notna(row.get("Baashind (€)")) else 0.0
-                                    wh_unit = str(row.get("Laoühik", "tk")).strip() if pd.notna(row.get("Laoühik")) and str(row.get("Laoühik", "")).strip() != 'nan' else "tk"
-                                    pu_unit = str(row.get("Ostuühik", "tk")).strip() if pd.notna(row.get("Ostuühik")) and str(row.get("Ostuühik", "")).strip() != 'nan' else "tk"
-                                    mult = float(row.get("Kordaja (Mitu laoühikut on ostuühikus)", 1.0)) if pd.notna(row.get("Kordaja (Mitu laoühikut on ostuühikus)")) else 1.0
+                                    code = parse_str(row.get("Kood"))
+                                    group = parse_str(row.get("Rühm"))
+                                    price = parse_float(row.get("Baashind (€)"), 0.0)
+                                    wh_unit = parse_str(row.get("Laoühik")) or "tk"
+                                    pu_unit = parse_str(row.get("Ostuühik")) or "tk"
+                                    mult = parse_float(row.get("Kordaja (Mitu laoühikut on ostuühikus)"), 1.0)
 
-                                    # TARNIJA ANDMED
-                                    supplier_name = str(row.get("Tarnija", "")).strip() if pd.notna(row.get("Tarnija")) else ""
-                                    if supplier_name.lower() == 'nan': supplier_name = ""
-                                    
-                                    sup_code = str(row.get("Tarnija kood", "")).strip() if pd.notna(row.get("Tarnija kood")) else None
-                                    if sup_code and sup_code.lower() == 'nan': sup_code = None
-                                    
-                                    sup_prod_name = str(row.get("Tarnija toote nimetus", "")).strip() if pd.notna(row.get("Tarnija toote nimetus")) else None
-                                    if sup_prod_name and sup_prod_name.lower() == 'nan': sup_prod_name = None
+                                    supplier_name = parse_str(row.get("Tarnija"))
+                                    sup_code = parse_str(row.get("Tarnija kood"))
+                                    sup_prod_name = parse_str(row.get("Tarnija toote nimetus"))
 
-                                    # DUPLIKAATIDE KONTROLL
-                                    ex_code = db.query(Product).filter(Product.code == code).first() if code else None
-                                    ex_name = db.query(Product).filter(Product.name == name, Product.product_group == group).first()
-                                    
-                                    if ex_code or ex_name:
+                                    if code and code in existing_codes:
                                         error_count += 1
-                                    else:
-                                        # 1. LISAME TOOTE
-                                        new_product = Product(
-                                            name=name, code=code, product_group=group, 
-                                            default_price=price, warehouse_unit=wh_unit, 
-                                            purchase_unit=pu_unit, conversion_multiplier=mult
-                                        )
-                                        db.add(new_product)
-                                        db.flush()
+                                        continue
+                                    if (name, group) in existing_names_groups:
+                                        error_count += 1
+                                        continue
+                                    
+                                    new_product = Product(
+                                        name=name, code=code, product_group=group, 
+                                        default_price=price, warehouse_unit=wh_unit, 
+                                        purchase_unit=pu_unit, conversion_multiplier=mult
+                                    )
+                                    db.add(new_product)
+                                    db.flush()
+                                    
+                                    if code: existing_codes.add(code)
+                                    existing_names_groups.add((name, group))
                                         
-                                        # 2. LISAME TARNIJA (kui on määratud)
-                                        sup = None
-                                        if supplier_name:
-                                            sup = db.query(Supplier).filter(Supplier.name == supplier_name).first()
-                                            if not sup:
-                                                sup = Supplier(name=supplier_name)
-                                                db.add(sup)
-                                                db.flush()
+                                    if supplier_name:
+                                        if supplier_name not in supplier_map:
+                                            sup = Supplier(name=supplier_name)
+                                            db.add(sup)
+                                            db.flush()
+                                            supplier_map[supplier_name] = sup
+                                        else: sup = supplier_map[supplier_name]
                                             
-                                            # 3. LOOME SEOSKANDE (0-kogusega sissetulek)
-                                            link_trans = Transaction(
-                                                product_id=new_product.id,
-                                                supplier_id=sup.id,
-                                                supplier_code=sup_code,
-                                                supplier_product_name=sup_prod_name,
-                                                type=TransactionType.IN_STOCK,
-                                                quantity=0.0,
-                                                price=price,
-                                                notes="Esmane tarnija sidumine (Excelist laadimine)"
-                                            )
-                                            db.add(link_trans)
+                                        link_trans = Transaction(
+                                            product_id=new_product.id,
+                                            supplier_id=sup.id,
+                                            supplier_code=sup_code,
+                                            supplier_product_name=sup_prod_name,
+                                            type=TransactionType.IN_STOCK,
+                                            quantity=0.0,
+                                            price=price,
+                                            notes="Esmane tarnija sidumine (Excelist laadimine)"
+                                        )
+                                        db.add(link_trans)
 
-                                        added_count += 1
+                                    added_count += 1
                                         
                                 if added_count > 0:
                                     db.commit()
                                     msg = f"✅ Edukas! Lisati {added_count} uut toodet."
-                                    if error_count > 0:
-                                        msg += f" (Eirati {error_count} toodet, mis olid juba andmebaasis olemas)."
+                                    if error_count > 0: msg += f" (Eirati {error_count} toodet, mis olid juba süsteemis)."
                                     st.session_state['prod_success'] = msg
-                                else:
-                                    st.session_state['prod_error'] = "⚠️ Ühtegi uut toodet ei lisatud (kõik olid juba olemas või info puudus)."
+                                else: st.session_state['prod_error'] = f"⚠️ Ühtegi uut toodet ei lisatud (kõik {error_count} olid juba olemas või info puudus)."
                                 st.rerun()
 
                             except Exception as db_error:
@@ -950,8 +969,7 @@ def render_product_management(db):
 
 def render_history(db):
     h_col1, h_col2 = st.columns([3, 1])
-    with h_col1:
-        st.title("🕒 Kannete logi")
+    with h_col1: st.title("🕒 Kannete logi")
         
     f_val = st.radio("Filtreeri:", ["Kõik kanded", "Sissetulek (IN)", "Tootmisse (TO_PROD)", "Kulu (PROD_CONS)", "Väljaminek (OUT)", "Tagastus (RETURN)"], horizontal=True)
     
@@ -984,21 +1002,16 @@ def render_history(db):
 # ==========================================
 # 5. PEAMINE ROUTER TRY/FINALLY PLOKIS
 # ==========================================
-# See on lahendus andmebaasi ummistumisele (connection pool exhaustion)
 db = get_db()
 try:
-    all_products, product_options, supplier_names, inventory_data, total_items_main, total_items_prod, total_value = calculate_global_inventory(db)
-    
-    if menyuu_valik == "📊 Ladu ja Töölaud": render_dashboard()
-    elif menyuu_valik == "📋 Tootekataloog": render_catalog()
-    elif menyuu_valik in ["📥 Sissetulek", "📤 Väljastus / Tootmine"]: render_transactions(menyuu_valik == "📥 Sissetulek")
+    # OPTIMEERITUD LAADIMINE - Enam ei lae kogu süsteemi andmeid alguses!
+    # Kutsutakse välja vaid spetsiifilisele lehele vastav loogika.
+    if menyuu_valik == "📊 Ladu ja Töölaud": render_dashboard(db)
+    elif menyuu_valik == "📋 Tootekataloog": render_catalog(db)
+    elif menyuu_valik in ["📥 Sissetulek", "📤 Väljastus / Tootmine"]: render_transactions(db, menyuu_valik == "📥 Sissetulek")
     elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
     elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
     elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
     elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
-
 finally:
-    # TRY..FINALLY tagab, et isegi siis, kui st.rerun() peatab koodi täitmise
-    # või tekib ootamatu viga, pannakse andmebaasiühendus ALATI ja 100% korrektselt kinni.
-    # See lahendab süsteemi "ketrama jäämise" probleemi.
     db.close()
