@@ -305,8 +305,10 @@ st.markdown("""
     
     .stTextInput input, .stNumberInput input { border-radius: 10px !important; border: 1px solid #CBD5E1 !important; padding: 0.5rem 1rem !important; }
     .stTextInput input:focus, .stNumberInput input:focus { border-color: #3B82F6 !important; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important; }
-    [data-testid="stDataFrame"] { background-color: #FFFFFF; border-radius: 16px; padding: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; }
-    [data-testid="stExpander"] { background-color: #FFFFFF; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; overflow: hidden; }
+    
+    /* Sunnime tabeli ja filtrikastid absoluutselt 100% laiuseks, isegi kui andmeid on vähe */
+    [data-testid="stDataFrame"] { background-color: #FFFFFF; border-radius: 16px; padding: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; width: 100% !important; min-width: 100% !important; }
+    [data-testid="stExpander"] { background-color: #FFFFFF; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; box-sizing: border-box; overflow: hidden; width: 100% !important; min-width: 100% !important; }
     [data-testid="stExpander"] details { border-color: transparent; }
 </style>
 """, unsafe_allow_html=True)
