@@ -337,9 +337,8 @@ def render_dashboard(db):
     total_products, inventory_data, total_items_main, total_items_prod, total_value = calculate_global_inventory(db)
     
     df = pd.DataFrame(inventory_data) if inventory_data else pd.DataFrame()
-    if not df.empty:
-        with h_col2: render_excel_download(df, "laoseis")
             
+    # Mõõdikud kuvavad alati KOGU lao seisu
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Erinevaid tooteid", total_products)
     m2.metric("Esemeid PÕHILAOS", f"{total_items_main:g}")
@@ -350,10 +349,36 @@ def render_dashboard(db):
     st.subheader("Hetke laoseis ja asukohad")
 
     if not df.empty:
+        # --- FILTREERIMINE ---
+        with st.expander("🔍 Otsing ja filtrid", expanded=True):
+            f1, f2, f3 = st.columns(3)
+            with f1:
+                f_kood = st.text_input("Tootekood (osaline otsing)", key="dash_kood")
+            with f2:
+                f_nimi = st.text_input("Nimetus (osaline otsing)", key="dash_nimi")
+            with f3:
+                all_groups = sorted([g for g in df["Tooterühm"].unique() if g and g != "-"])
+                f_grupp = st.multiselect("Tooterühm", options=all_groups, key="dash_grupp")
+                
+        filtered_df = df.copy()
+        if f_kood:
+            filtered_df = filtered_df[filtered_df["Tootekood"].astype(str).str.contains(f_kood, case=False, na=False)]
+        if f_nimi:
+            filtered_df = filtered_df[filtered_df["Nimetus"].astype(str).str.contains(f_nimi, case=False, na=False)]
+        if f_grupp:
+            filtered_df = filtered_df[filtered_df["Tooterühm"].isin(f_grupp)]
+            
+        st.markdown(f"<div style='margin-top: 1rem; margin-bottom: 1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Kuvatakse {len(filtered_df)} rida</span></div>", unsafe_allow_html=True)
+        # ----------------------
+
+        # Nüüd renderdame Exceli nupu üles paremale nurka, aga anname talle filtreeritud andmed!
+        with h_col2: 
+            render_excel_download(filtered_df, "laoseis")
+
         def hi_main(val): return 'color: #10B981; font-weight: 700;' if val > 0 else ('color: #EF4444; font-weight: 700;' if val < 0 else 'color: #94A3B8;')
         def hi_prod(val): return 'color: #F59E0B; font-weight: 700;' if val > 0 else 'color: #94A3B8;'
             
-        styled_df = df.style.map(hi_main, subset=['Põhiladu']).map(hi_prod, subset=['Tootmises']).format({
+        styled_df = filtered_df.style.map(hi_main, subset=['Põhiladu']).map(hi_prod, subset=['Tootmises']).format({
             "Põhiladu": "{:g}", "Tootmises": "{:g}", "Keskmine hind (€)": "{:.2f}", "Koguväärtus (€)": "{:.2f}"
         })
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=550)
