@@ -851,7 +851,7 @@ def render_product_management(db):
             
         if uploaded_file:
             try:
-                df_upload = pd.read_excel(uploaded_file, engine='openpyxl')
+                df_upload = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str)
                 
                 if "Nimetus" not in df_upload.columns:
                     st.error("⚠️ Fail peab sisaldama 'Nimetus' veergu! Palun kasuta allalaaditavat malli.")
