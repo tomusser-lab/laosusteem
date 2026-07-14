@@ -992,3 +992,5 @@ elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
 elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
 elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
 elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
+# SULGEME ÜHENDUSE, ET VÄLTIDA ANDMEBAASI UMMISTUMIST
+db.close()
