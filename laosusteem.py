@@ -152,12 +152,17 @@ def init_database_connection():
             if "phone" not in columns_s: conn.execute(text("ALTER TABLE suppliers ADD COLUMN phone VARCHAR"))
 
         try:
+            # Optimeerimiseks lisatud indeksid
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_prod_id ON transactions(product_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_sup_id ON transactions(supplier_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_po_prod_id ON purchase_orders(product_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_po_sup_id ON purchase_orders(supplier_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_type ON transactions(type)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_date ON transactions(transaction_date)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prod_name ON products(name)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prod_code ON products(code)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sup_name ON suppliers(name)"))
         except Exception: pass
             
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -183,11 +188,28 @@ def render_excel_download(df, prefix="andmed"):
         use_container_width=True
     )
 
+def parse_float(val, default_val=0.0):
+    if pd.isna(val): return default_val
+    val_str = str(val).strip().lower()
+    if val_str in ['nan', 'none', 'null', '']: return default_val
+    try: return float(val_str.replace(',', '.'))
+    except (ValueError, TypeError): return default_val
+    
+def parse_str(val):
+    if pd.isna(val): return None
+    val_str = str(val).strip()
+    if val_str.lower() in ['nan', 'none', 'null', '']: return None
+    return val_str
+
 def is_discrete_unit(unit_str):
     if not unit_str: return False
     return unit_str.strip().lower() in ['tk', 'tükk', 'komplekt', 'paar']
 
-def format_color_status(val, red_vals, green_vals, yellow_vals=[], blue_vals=[], purple_vals=[]):
+def format_color_status(val, red_vals, green_vals, yellow_vals=None, blue_vals=None, purple_vals=None):
+    if yellow_vals is None: yellow_vals = []
+    if blue_vals is None: blue_vals = []
+    if purple_vals is None: purple_vals = []
+    
     if val in green_vals: return 'color: #10B981; font-weight: 700;'
     if val in red_vals: return 'color: #EF4444; font-weight: 700;'
     if val in yellow_vals: return 'color: #F59E0B; font-weight: 700;'
@@ -331,7 +353,7 @@ menyuu_valik = st.sidebar.radio("Menüü", [
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 12.0 (Tarnijate kontaktid)")
+st.sidebar.caption("Versioon 12.1 (Optimeeritud jõudlus)")
 
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -447,18 +469,6 @@ def render_catalog(db):
     with h_col2: render_excel_download(filtered_df, "tootekataloog")
     st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=600)
 
-def parse_float(val, default_val=0.0):
-    if pd.isna(val): return default_val
-    val_str = str(val).strip().lower()
-    if val_str in ['nan', 'none', 'null', '']: return default_val
-    try: return float(val_str.replace(',', '.'))
-    except (ValueError, TypeError): return default_val
-    
-def parse_str(val):
-    if pd.isna(val): return None
-    val_str = str(val).strip()
-    if val_str.lower() in ['nan', 'none', 'null', '']: return None
-    return val_str
 
 def render_transactions(db, is_in_transaction):
     st.title("📥 Sissetulek" if is_in_transaction else "📤 Väljastus ja Tootmisse kandmine")
@@ -587,6 +597,11 @@ def render_transactions(db, is_in_transaction):
                         running_stocks = {}
                         supplier_map = {s.name: s for s in db.query(Supplier).all()}
                         
+                        # Optimeeritud toodete otsing tsüklist väljas!
+                        prod_opts = get_cached_product_options(st.session_state.db_update_counter).values()
+                        code_map = {p['code']: p for p in prod_opts if p['code']}
+                        name_map = {p['name']: p for p in prod_opts}
+                        
                         for idx, row in df_up.iterrows():
                             code = parse_str(row.get("Tootekood"))
                             name = parse_str(row.get("Nimetus"))
@@ -594,17 +609,17 @@ def render_transactions(db, is_in_transaction):
                             if not code and not name:
                                 continue
                                 
-                            p = None
-                            if code: p = db.query(Product).filter(Product.code == code).first()
-                            if not p and name: p = db.query(Product).filter(Product.name == name).first()
+                            p_info = None
+                            if code: p_info = code_map.get(code)
+                            if not p_info and name: p_info = name_map.get(name)
                             
-                            if not p:
+                            if not p_info:
                                 errors.append(f"Rida {idx+2}: Toodet koodiga '{code or '-'}' ja nimega '{name or '-'}' ei leitud süsteemist!")
                                 continue
                                 
                             qty = parse_float(row.get("Kogus"), 0.0)
                             if qty <= 0:
-                                errors.append(f"Rida {idx+2}: Kogus on vigane või 0 (Toode: {p.name}).")
+                                errors.append(f"Rida {idx+2}: Kogus on vigane või 0 (Toode: {p_info['name']}).")
                                 continue
                                 
                             notes = parse_str(row.get("Kommentaar")) or ""
@@ -624,15 +639,15 @@ def render_transactions(db, is_in_transaction):
                                         supplier_map[sup_name] = new_sup
                                     final_sup_id = supplier_map[sup_name].id
                                     
-                                mult = p.conversion_multiplier or 1.0
+                                mult = p_info['conversion_multiplier'] or 1.0
                                 final_qty = qty * mult
-                                if is_discrete_unit(p.warehouse_unit): final_qty = round(final_qty)
+                                if is_discrete_unit(p_info['warehouse_unit']): final_qty = round(final_qty)
                                 final_price = price / mult if mult else price
                                 
-                                final_notes = f"[Excel Import: {qty:g} {p.purchase_unit}] {notes}".strip() if mult != 1.0 else notes
+                                final_notes = f"[Excel Import: {qty:g} {p_info['purchase_unit']}] {notes}".strip() if mult != 1.0 else notes
                                 
                                 db.add(Transaction(
-                                    product_id=p.id, supplier_id=final_sup_id, supplier_code=sup_code, supplier_product_name=sup_prod_name,
+                                    product_id=p_info['id'], supplier_id=final_sup_id, supplier_code=sup_code, supplier_product_name=sup_prod_name,
                                     type=TransactionType.IN_STOCK, quantity=final_qty, price=final_price, notes=final_notes
                                 ))
                                 added_count += 1
@@ -641,17 +656,17 @@ def render_transactions(db, is_in_transaction):
                                 action_val = parse_str(row.get("Tegevus (TOOTMISSE või VÄLJAMINEK)")) or "VÄLJAMINEK"
                                 t_type = TransactionType.TO_PROD if action_val.upper() == "TOOTMISSE" else TransactionType.OUT_STOCK
                                 
-                                if p.id not in running_stocks:
-                                    running_stocks[p.id] = get_product_main_stock(db, p.id)
+                                if p_info['id'] not in running_stocks:
+                                    running_stocks[p_info['id']] = get_product_main_stock(db, p_info['id'])
                                 
-                                if qty > running_stocks[p.id]:
-                                    errors.append(f"Rida {idx+2}: Põhilaos pole piisavalt toodet '{p.name}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p.id]:g})")
+                                if qty > running_stocks[p_info['id']]:
+                                    errors.append(f"Rida {idx+2}: Põhilaos pole piisavalt toodet '{p_info['name']}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p_info['id']]:g})")
                                     continue
                                     
-                                running_stocks[p.id] -= qty
+                                running_stocks[p_info['id']] -= qty
                                 
                                 db.add(Transaction(
-                                    product_id=p.id, type=t_type, quantity=qty, price=0.0, notes=notes
+                                    product_id=p_info['id'], type=t_type, quantity=qty, price=0.0, notes=notes
                                 ))
                                 added_count += 1
 
@@ -748,7 +763,6 @@ def render_orders(db):
                         act_sup = "- Puudub -"
                     else: act_sup = db_sup
 
-                # Näita tarnija kontakte uue funktsionaalsusena ALATI
                 if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
                     s_obj = db.query(Supplier).filter(Supplier.name == act_sup).first()
                     if s_obj:
@@ -806,7 +820,6 @@ def render_orders(db):
                     trigger_db_update()
                     st.session_state['order_success'] = "✅ Tellimus edukalt salvestatud!"
                     
-                    # Tühjenda väljad
                     for k in ["new_ord_prod", "new_ord_qty", "new_ord_price", "new_ord_sup_ch", "new_ord_db_sup", "new_ord_n_sup"]:
                         if k in st.session_state: del st.session_state[k]
                     st.rerun()
@@ -844,7 +857,7 @@ def render_orders(db):
         hist = db.query(PurchaseOrder).options(joinedload(PurchaseOrder.product), joinedload(PurchaseOrder.supplier)).filter(PurchaseOrder.status != OrderStatus.PENDING).order_by(PurchaseOrder.id.desc()).limit(1000).all()
         if hist:
             df_h = pd.DataFrame([{"ID": o.id, "Toode": o.product.name, "Kogus": f"{o.quantity:g} {o.product.purchase_unit}", "Tarnija": o.supplier.name if o.supplier else "-", "Hind": o.price, "Seis": o.status.value, "Saabus": o.arrival_date.strftime("%d.%m.%Y") if o.arrival_date else "-"} for o in hist])
-            st.dataframe(df_h.style.map(lambda v: format_color_status(v, ['Tühistatud'], ['Saabunud']), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
+            st.dataframe(df_h.style.map(lambda v: format_color_status(v, {'Tühistatud'}, {'Saabunud'}), subset=['Seis']).format({"Hind": "{:.2f}"}), use_container_width=True, hide_index=True)
         else: st.info("Ajalugu on tühi.")
         
     with tab_gsheets:
@@ -887,9 +900,10 @@ def render_orders(db):
             else:
                 st.markdown("### 📊 Materjali vajaduse analüüs")
                 
-                all_products = db.query(Product).all()
-                code_map = {p.code: p for p in all_products if p.code}
-                name_map = {p.name: p for p in all_products}
+                # Optimeeritud otsing
+                prod_opts = get_cached_product_options(st.session_state.db_update_counter).values()
+                code_map = {p['code']: p for p in prod_opts if p['code']}
+                name_map = {p['name']: p for p in prod_opts}
                 
                 _, inventory_data, _, _, _ = get_cached_inventory(st.session_state.db_update_counter)
                 stock_by_code = {item["Tootekood"]: item["Põhiladu"] for item in inventory_data if item["Tootekood"] != "-"}
@@ -930,9 +944,9 @@ def render_orders(db):
                     elif name_val and name_val in name_map: matched_product = name_map[name_val]
                     
                     if matched_product:
-                        prod_id = matched_product.id
+                        prod_id = matched_product['id']
                         if prod_id not in running_stock:
-                            s_val = stock_by_code.get(matched_product.code, stock_by_name.get(matched_product.name, 0.0))
+                            s_val = stock_by_code.get(matched_product['code'], stock_by_name.get(matched_product['name'], 0.0))
                             running_stock[prod_id] = s_val
                             
                         current_avail = running_stock[prod_id]
@@ -940,11 +954,11 @@ def render_orders(db):
                         running_stock[prod_id] -= req_qty 
                         
                         analysis_results.append({
-                            "Nädal": week_val, "Kood": matched_product.code or "-", "Nimetus": matched_product.name,
+                            "Nädal": week_val, "Kood": matched_product['code'] or "-", "Nimetus": matched_product['name'],
                             "Vaja (tk/m)": req_qty, "Laos vaba enne": current_avail, "Puudu (Telli)": deficit,
-                            "Ühik": matched_product.warehouse_unit
+                            "Ühik": matched_product['warehouse_unit']
                         })
-                        if deficit > 0: orders_to_create.append({"prod": matched_product, "qty": deficit, "week": week_val})
+                        if deficit > 0: orders_to_create.append({"prod_id": prod_id, "qty": deficit, "week": week_val, "default_price": matched_product['default_price']})
                     else:
                         analysis_results.append({
                             "Nädal": week_val, "Kood": code_val, "Nimetus": name_val,
@@ -964,15 +978,16 @@ def render_orders(db):
                         if st.button("🛒 Koosta tellimused PUUDUOLEVATELE kogustele", type="primary", use_container_width=True):
                             added_orders = 0
                             for item in orders_to_create:
-                                p = item['prod']
+                                p_id = item['prod_id']
                                 q = item['qty']
+                                def_price = item['default_price']
                                 last_sup_tx = db.query(Transaction.supplier_id).filter(
-                                    Transaction.product_id == p.id, Transaction.type == TransactionType.IN_STOCK, Transaction.supplier_id.isnot(None)
+                                    Transaction.product_id == p_id, Transaction.type == TransactionType.IN_STOCK, Transaction.supplier_id.isnot(None)
                                 ).order_by(Transaction.transaction_date.desc()).first()
                                 
                                 new_order = PurchaseOrder(
-                                    product_id=p.id, supplier_id=last_sup_tx[0] if last_sup_tx else None,
-                                    quantity=q, price=p.default_price or 0.0,
+                                    product_id=p_id, supplier_id=last_sup_tx[0] if last_sup_tx else None,
+                                    quantity=q, price=def_price or 0.0,
                                     order_date=get_estonian_time().date(), expected_delivery_date=get_estonian_time().date() + timedelta(days=7)
                                 )
                                 db.add(new_order)
@@ -1019,6 +1034,11 @@ def render_inventory(db):
                 st.error("⚠️ Failis peab olema veerg 'Tootekood' või 'Nimetus'!")
                 return
 
+            # Optimeeritud toodete otsing tsüklist väljas!
+            prod_opts = get_cached_product_options(st.session_state.db_update_counter).values()
+            code_map = {p['code']: p for p in prod_opts if p['code']}
+            name_map = {p['name']: p for p in prod_opts}
+
             for _, r in df.iterrows():
                 try:
                     q_val = r.get(qty_col)
@@ -1031,10 +1051,10 @@ def render_inventory(db):
                     if code_str.lower() == 'nan': code_str = ""
                     if name_str.lower() == 'nan': name_str = ""
                     
-                    p = None
-                    if code_str: p = db.query(Product).filter(Product.code == code_str).first()
-                    if not p and name_str: p = db.query(Product).filter(Product.name == name_str).first()
-                    if p: valid.append({"prod": p, "left_qty": left_in_prod})
+                    p_info = None
+                    if code_str: p_info = code_map.get(code_str)
+                    if not p_info and name_str: p_info = name_map.get(name_str)
+                    if p_info: valid.append({"prod": p_info, "left_qty": left_in_prod})
                 except ValueError: pass 
             
             if valid:
@@ -1044,21 +1064,21 @@ def render_inventory(db):
                 
                 for i in valid:
                     p = i['prod']
-                    left_qty = round(i['left_qty']) if is_discrete_unit(p.warehouse_unit) else i['left_qty']
+                    left_qty = round(i['left_qty']) if is_discrete_unit(p['warehouse_unit']) else i['left_qty']
                     
-                    search_code = p.code or "-"
+                    search_code = p['code'] or "-"
                     stock_info = next((item for item in inventory_data if item["Tootekood"] == search_code), None)
-                    if not stock_info: stock_info = next((item for item in inventory_data if item["Nimetus"] == p.name), None)
+                    if not stock_info: stock_info = next((item for item in inventory_data if item["Nimetus"] == p['name']), None)
                     
                     curr_prod_stock = stock_info["Tootmises"] if stock_info else 0.0
                     consumed_qty = max(0, curr_prod_stock - left_qty)
                     
                     if consumed_qty > 0:
                         preview_data.append({
-                            "Kood": p.code or "-", "Toode": p.name, "Süsteemi järgi tootmises": curr_prod_stock,
-                            "Füüsiline jääk (Excelist)": left_qty, "Kandub kulusse": consumed_qty, "Ühik": p.warehouse_unit
+                            "Kood": p['code'] or "-", "Toode": p['name'], "Süsteemi järgi tootmises": curr_prod_stock,
+                            "Füüsiline jääk (Excelist)": left_qty, "Kandub kulusse": consumed_qty, "Ühik": p['warehouse_unit']
                         })
-                        transactions_to_make.append({"prod": p, "cons": consumed_qty, "avg_p": stock_info["Keskmine hind (€)"] if stock_info else p.default_price})
+                        transactions_to_make.append({"prod_id": p['id'], "cons": consumed_qty, "avg_p": stock_info["Keskmine hind (€)"] if stock_info else p['default_price']})
 
                 if preview_data:
                     st.markdown("### 🔍 Inventuuri eelvaade")
@@ -1066,8 +1086,7 @@ def render_inventory(db):
                     
                     if st.button("💾 Kinnita tootmise kulud", type="primary", use_container_width=True):
                         for item in transactions_to_make:
-                            p = item['prod']
-                            db.add(Transaction(product_id=p.id, type=TransactionType.PROD_CONS, quantity=item['cons'], price=item['avg_p'], notes="Tootmise kulu (Inventuur)"))
+                            db.add(Transaction(product_id=item['prod_id'], type=TransactionType.PROD_CONS, quantity=item['cons'], price=item['avg_p'], notes="Tootmise kulu (Inventuur)"))
                         db.commit()
                         trigger_db_update()
                         st.session_state['inv_success'] = "Tootmise kulud edukalt maha kantud!"
@@ -1248,7 +1267,6 @@ def render_suppliers(db):
                 search_query = st.text_input("Otsi tarnija nime, kontakti, e-maili või telefoni järgi...", key="sup_search")
                 
             if search_query:
-                # Otsime teksti kõikidest veergudest (case-insensitive)
                 mask = df_sup.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
                 filtered_df = df_sup[mask]
             else:
@@ -1331,7 +1349,7 @@ def render_history(db):
             render_excel_download(df, "ajalugu")
         if len(data) == 3000:
             st.warning("⚠️ Kuvatakse ainult viimased 3000 kannet, et hoida süsteem kiirena.")
-        st.dataframe(df.style.map(lambda v: format_color_status(v, ['Väljaminek (OUT)'], ['Sissetulek (IN)'], ['Kanti tootmisse (TO_PROD)'], ['Tagastus (RETURN)'], ['Tootmise kulu (PROD_CONS)']), subset=['Tüüp']).format({"Kogus": "{:g}", "Hind (€)": "{:.2f}"}), use_container_width=True, hide_index=True, height=600)
+        st.dataframe(df.style.map(lambda v: format_color_status(v, {'Väljaminek (OUT)'}, {'Sissetulek (IN)'}, {'Kanti tootmisse (TO_PROD)'}, {'Tagastus (RETURN)'}, {'Tootmise kulu (PROD_CONS)'}), subset=['Tüüp']).format({"Kogus": "{:g}", "Hind (€)": "{:.2f}"}), use_container_width=True, hide_index=True, height=600)
     else: st.info("Kandeid ei leitud.")
 
 
