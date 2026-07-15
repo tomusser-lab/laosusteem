@@ -57,6 +57,9 @@ class Supplier(Base):
     __tablename__ = "suppliers"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
+    contact_person = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
     transactions = relationship("Transaction", back_populates="supplier")
     purchase_orders = relationship("PurchaseOrder", back_populates="supplier")
 
@@ -141,6 +144,12 @@ def init_database_connection():
         if columns_po:
             if "supplier_code" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR"))
             if "supplier_product_name" not in columns_po: conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_product_name VARCHAR"))
+
+        columns_s = get_columns("suppliers")
+        if columns_s:
+            if "contact_person" not in columns_s: conn.execute(text("ALTER TABLE suppliers ADD COLUMN contact_person VARCHAR"))
+            if "email" not in columns_s: conn.execute(text("ALTER TABLE suppliers ADD COLUMN email VARCHAR"))
+            if "phone" not in columns_s: conn.execute(text("ALTER TABLE suppliers ADD COLUMN phone VARCHAR"))
 
         try:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_trans_prod_id ON transactions(product_id)"))
@@ -246,7 +255,6 @@ def get_cached_product_options(update_trigger):
             Product.conversion_multiplier, Product.default_price
         ).order_by(Product.name).all()
         
-        # Teeme kergekaalulise dicti (ORM objekt on mälus raske)
         res = {}
         for p in products:
             key = f"{p.name} ({p.code if p.code else 'Kood puudub'})"
@@ -320,10 +328,10 @@ st.sidebar.markdown("""
 
 menyuu_valik = st.sidebar.radio("Menüü", [
     "📊 Ladu ja Töölaud", "📋 Tootekataloog", "📥 Sissetulek", "📤 Väljastus / Tootmine", 
-    "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🕒 Kannete ajalugu"
+    "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 11.2 (Importimise toe lisamine)")
+st.sidebar.caption("Versioon 12.0 (Tarnijate kontaktid)")
 
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -333,7 +341,6 @@ def render_dashboard():
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1: st.title("📊 Ladu ja Töölaud")
     
-    # Kutsutakse välja cache'ist!
     total_products, inventory_data, total_items_main, total_items_prod, total_value = get_cached_inventory(st.session_state.db_update_counter)
     
     df = pd.DataFrame(inventory_data) if inventory_data else pd.DataFrame()
@@ -740,6 +747,16 @@ def render_orders(db):
                         n_sup = st.text_input("Uue tarnija nimi", key="new_ord_n_sup")
                         act_sup = "- Puudub -"
                     else: act_sup = db_sup
+
+                # Näita tarnija kontakte uue funktsionaalsusena
+                if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
+                    s_obj = db.query(Supplier).filter(Supplier.name == act_sup).first()
+                    if s_obj and (s_obj.email or s_obj.phone or s_obj.contact_person):
+                        details = []
+                        if s_obj.contact_person: details.append(f"👤 {s_obj.contact_person}")
+                        if s_obj.email: details.append(f"📧 {s_obj.email}")
+                        if s_obj.phone: details.append(f"📞 {s_obj.phone}")
+                        st.info(" **Tarnija kontaktid:** " + " | ".join(details))
                         
                 c_opt, n_opt = [""], [""]
                 if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
@@ -1199,6 +1216,69 @@ def render_product_management(db):
             except Exception as e:
                 st.error(f"Viga faili lugemisel: {e}")
 
+def render_suppliers(db):
+    st.title("🏢 Tarnijate haldus")
+    st.markdown("Halda oma tarnijate kontaktandmeid, et tellimuste tegemine oleks kiirem ja mugavam.")
+    
+    if 'sup_success' in st.session_state: st.success(st.session_state.pop('sup_success'))
+    if 'sup_error' in st.session_state: st.error(st.session_state.pop('sup_error'))
+
+    t1, t2 = st.tabs(["📋 Tarnijate nimekiri", "✏️ Muuda / Lisa kontakte"])
+    
+    suppliers = db.query(Supplier).order_by(Supplier.name).all()
+
+    with t1:
+        if not suppliers:
+            st.info("Ühtegi tarnijat pole süsteemi lisatud.")
+        else:
+            sup_data = []
+            for s in suppliers:
+                sup_data.append({
+                    "Nimi": s.name,
+                    "Kontaktisik": s.contact_person or "-",
+                    "E-mail": s.email or "-",
+                    "Telefon": s.phone or "-"
+                })
+            df_sup = pd.DataFrame(sup_data)
+            st.dataframe(df_sup, use_container_width=True, hide_index=True)
+
+    with t2:
+        if not suppliers:
+            st.info("Tarnijaid saab süsteemi luua läbi 'Sissetulek' või 'Ostutellimused' vaate.")
+        else:
+            col1, _ = st.columns([2, 1])
+            with col1:
+                sup_opts = {s.name: s for s in suppliers}
+                sel_sup_name = st.selectbox("Vali tarnija keda muuta:", ["Vali..."] + list(sup_opts.keys()))
+                
+                if sel_sup_name != "Vali...":
+                    active_sup = sup_opts[sel_sup_name]
+                    
+                    with st.form("supplier_edit_form"):
+                        st.subheader(f"Muuda: {active_sup.name}")
+                        new_name = st.text_input("Tarnija ärinimi (kohustuslik)", value=active_sup.name)
+                        new_contact = st.text_input("Kontaktisiku nimi", value=active_sup.contact_person if active_sup.contact_person else "")
+                        new_email = st.text_input("E-mail", value=active_sup.email if active_sup.email else "")
+                        new_phone = st.text_input("Telefoninumber", value=active_sup.phone if active_sup.phone else "")
+                        
+                        if st.form_submit_button("💾 Salvesta muudatused", type="primary", use_container_width=True):
+                            if not new_name.strip():
+                                st.session_state['sup_error'] = "Tarnija nimi ei saa olla tühi!"
+                            else:
+                                existing = db.query(Supplier).filter(Supplier.name == new_name.strip(), Supplier.id != active_sup.id).first()
+                                if existing:
+                                    st.session_state['sup_error'] = "Sellise nimega tarnija on juba olemas!"
+                                else:
+                                    active_sup.name = new_name.strip()
+                                    active_sup.contact_person = new_contact.strip() or None
+                                    active_sup.email = new_email.strip() or None
+                                    active_sup.phone = new_phone.strip() or None
+                                    
+                                    db.commit()
+                                    trigger_db_update()
+                                    st.session_state['sup_success'] = f"Tarnija '{active_sup.name}' andmed uuendatud!"
+                                    st.rerun()
+
 def render_history(db):
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1: st.title("🕒 Kannete logi")
@@ -1252,4 +1332,5 @@ with SessionLocal() as db:
     elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
     elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
     elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
+    elif menyuu_valik == "🏢 Tarnijate haldus": render_suppliers(db)
     elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
