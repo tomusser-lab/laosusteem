@@ -902,6 +902,7 @@ def render_orders(db):
                 with r_c1:
                     recv_qty = st.number_input(f"Saabunud kogus ({o.product.purchase_unit})", value=float(o.quantity), min_value=0.001)
                 with r_c2:
+                    st.write("") # Tekitab tühja rea, mis ühtlustab kasti kõrguse vasakpoolse labeliga
                     st.info("💡 Kui saabunud kogus on väiksem kui tellitud, luuakse ülejäägile automaatselt uus ootel tellimus.")
 
                 st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
