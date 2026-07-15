@@ -323,7 +323,7 @@ menyuu_valik = st.sidebar.radio("Menüü", [
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 11.1 (Kiirus-optimeeritud)")
+st.sidebar.caption("Versioon 11.2 (Importimise toe lisamine)")
 
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -440,6 +440,19 @@ def render_catalog(db):
     with h_col2: render_excel_download(filtered_df, "tootekataloog")
     st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=600)
 
+def parse_float(val, default_val=0.0):
+    if pd.isna(val): return default_val
+    val_str = str(val).strip().lower()
+    if val_str in ['nan', 'none', 'null', '']: return default_val
+    try: return float(val_str.replace(',', '.'))
+    except (ValueError, TypeError): return default_val
+    
+def parse_str(val):
+    if pd.isna(val): return None
+    val_str = str(val).strip()
+    if val_str.lower() in ['nan', 'none', 'null', '']: return None
+    return val_str
+
 def render_transactions(db, is_in_transaction):
     st.title("📥 Sissetulek" if is_in_transaction else "📤 Väljastus ja Tootmisse kandmine")
     if is_in_transaction: st.markdown("Registreeri lattu sissetulev kaup. Täida info **ostuühikutes**.")
@@ -448,81 +461,207 @@ def render_transactions(db, is_in_transaction):
     st.markdown("<br>", unsafe_allow_html=True)
     if 'trans_success' in st.session_state: st.success(st.session_state.pop('trans_success'))
     if 'trans_error' in st.session_state: st.error(st.session_state.pop('trans_error'))
-        
-    action_type = "Sissetulek"
-    if not is_in_transaction:
-        action_type = st.radio("Vali tegevus:", ["Kanna TOOTMISSE", "Tavaline VÄLJAMINEK (Müük vms)"], horizontal=True)
-        st.markdown("---")
     
-    col1, col2 = st.columns([2, 1]) 
-    with col1:
-        with st.container():
-            product_options = get_cached_product_options(st.session_state.db_update_counter)
-            selected_product_str = st.selectbox("Otsi toodet oma kataloogist", options=["Vali toode..."] + list(product_options.keys()))
-            
-            if selected_product_str == "Vali toode...": return
-            
-            prod = product_options[selected_product_str]
-            active_unit = prod["purchase_unit"] if is_in_transaction else prod["warehouse_unit"]
-            
-            t_sups = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod['id'], Transaction.type == TransactionType.IN_STOCK).distinct().all()
-            o_sups = db.query(Supplier.name).join(PurchaseOrder).filter(PurchaseOrder.product_id == prod['id']).distinct().all()
-            known_sups = sorted(list(set([s[0] for s in t_sups + o_sups])))
-            
-            last_sup = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod['id'], Transaction.type == TransactionType.IN_STOCK).order_by(Transaction.transaction_date.desc()).first()
-            last_sup_name = last_sup[0] if last_sup else None
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            f_col1, f_col2 = st.columns(2)
-            with f_col1: qty = st.number_input(f"Kogus ({active_unit})", min_value=0.001, step=1.0, value=1.0, format="%f")
-            
-            price = 0.0
-            if is_in_transaction:
-                with f_col2: price = st.number_input(f"Hind/{prod['purchase_unit']} (€)", min_value=0.0, step=0.01, value=float(prod['default_price'] or 0.0))
-            
-            actual_supplier_name, db_sup_choice, sup_code, sup_prod_name = "- Puudub -", "", "", ""
-            new_supplier_name = ""
-            
-            if is_in_transaction:
-                st.markdown("---")
-                st.caption("Tarnija info")
-                def_idx = known_sups.index(last_sup_name) + 1 if last_sup_name in known_sups else 0
-                supplier_choice = st.selectbox("Vali Tarnija (Tootekataloogist)", options=["- Puudub -"] + known_sups + ["🌍 Otsi andmebaasist / Lisa uus..."], index=def_idx)
-                actual_supplier_name = supplier_choice
-                
-                if supplier_choice == "🌍 Otsi andmebaasist / Lisa uus...":
-                    supplier_names = get_cached_supplier_names(st.session_state.db_update_counter)
-                    other_sups = sorted(list(set(supplier_names) - set(known_sups)))
-                    db_sup_choice = st.selectbox("Otsi olemasolevat tarnijat süsteemist", options=["➕ Sisesta uus tarnija..."] + other_sups)
-                    if db_sup_choice == "➕ Sisesta uus tarnija...":
-                        new_supplier_name = st.text_input("Uue tarnija nimi", placeholder="Sisesta uus tarnija nimi siia")
-                        actual_supplier_name = "- Puudub -"
-                    else: actual_supplier_name = db_sup_choice
-
-                c_options, n_options = [""], [""]
-                if actual_supplier_name not in ["- Puudub -", "🌍 Otsi andmebaasist / Lisa uus..."]:
-                    t_codes = db.query(Transaction.supplier_code).join(Supplier).filter(Transaction.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
-                    o_codes = db.query(PurchaseOrder.supplier_code).join(Supplier).filter(PurchaseOrder.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
-                    c_options = sorted([c[0] for c in t_codes + o_codes if c[0]])
-                    
-                    t_names = db.query(Transaction.supplier_product_name).join(Supplier).filter(Transaction.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
-                    o_names = db.query(PurchaseOrder.supplier_product_name).join(Supplier).filter(PurchaseOrder.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
-                    n_options = sorted([n[0] for n in t_names + o_names if n[0]])
-
-                sc_col1, sc_col2 = st.columns(2)
-                with sc_col1:
-                    sup_code = st.selectbox("Tarnija kood", options=c_options + ["➕ Sisesta uus..."]) if c_options else st.text_input("Tarnija kood")
-                    if sup_code == "➕ Sisesta uus...": sup_code = st.text_input("Uus tarnija kood", placeholder="Sisesta kood siia")
-                with sc_col2:
-                    sup_prod_name = st.selectbox("Tarnija toote nimetus", options=n_options + ["➕ Sisesta uus..."]) if n_options else st.text_input("Tarnija toote nimetus")
-                    if sup_prod_name == "➕ Sisesta uus...": sup_prod_name = st.text_input("Uus toote nimetus", placeholder="Sisesta nimetus siia")
-                
+    tab_manual, tab_excel = st.tabs(["✍️ Käsitsi sisestamine", "📁 Excelist laadimine (Mitu korraga)"])
+    
+    with tab_manual:
+        action_type = "Sissetulek"
+        if not is_in_transaction:
+            action_type = st.radio("Vali tegevus:", ["Kanna TOOTMISSE", "Tavaline VÄLJAMINEK (Müük vms)"], horizontal=True)
             st.markdown("---")
-            notes = st.text_input("Kommentaar (valikuline)", placeholder="nt. Arve nr / Saateleht...")
+        
+        col1, col2 = st.columns([2, 1]) 
+        with col1:
+            with st.container():
+                product_options = get_cached_product_options(st.session_state.db_update_counter)
+                selected_product_str = st.selectbox("Otsi toodet oma kataloogist", options=["Vali toode..."] + list(product_options.keys()))
+                
+                if selected_product_str != "Vali toode...":
+                    prod = product_options[selected_product_str]
+                    active_unit = prod["purchase_unit"] if is_in_transaction else prod["warehouse_unit"]
+                    
+                    t_sups = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod['id'], Transaction.type == TransactionType.IN_STOCK).distinct().all()
+                    o_sups = db.query(Supplier.name).join(PurchaseOrder).filter(PurchaseOrder.product_id == prod['id']).distinct().all()
+                    known_sups = sorted(list(set([s[0] for s in t_sups + o_sups])))
+                    
+                    last_sup = db.query(Supplier.name).join(Transaction).filter(Transaction.product_id == prod['id'], Transaction.type == TransactionType.IN_STOCK).order_by(Transaction.transaction_date.desc()).first()
+                    last_sup_name = last_sup[0] if last_sup else None
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    f_col1, f_col2 = st.columns(2)
+                    with f_col1: qty = st.number_input(f"Kogus ({active_unit})", min_value=0.001, step=1.0, value=1.0, format="%f")
+                    
+                    price = 0.0
+                    if is_in_transaction:
+                        with f_col2: price = st.number_input(f"Hind/{prod['purchase_unit']} (€)", min_value=0.0, step=0.01, value=float(prod['default_price'] or 0.0))
+                    
+                    actual_supplier_name, db_sup_choice, sup_code, sup_prod_name = "- Puudub -", "", "", ""
+                    new_supplier_name = ""
+                    
+                    if is_in_transaction:
+                        st.markdown("---")
+                        st.caption("Tarnija info")
+                        def_idx = known_sups.index(last_sup_name) + 1 if last_sup_name in known_sups else 0
+                        supplier_choice = st.selectbox("Vali Tarnija (Tootekataloogist)", options=["- Puudub -"] + known_sups + ["🌍 Otsi andmebaasist / Lisa uus..."], index=def_idx)
+                        actual_supplier_name = supplier_choice
+                        
+                        if supplier_choice == "🌍 Otsi andmebaasist / Lisa uus...":
+                            supplier_names = get_cached_supplier_names(st.session_state.db_update_counter)
+                            other_sups = sorted(list(set(supplier_names) - set(known_sups)))
+                            db_sup_choice = st.selectbox("Otsi olemasolevat tarnijat süsteemist", options=["➕ Sisesta uus tarnija..."] + other_sups)
+                            if db_sup_choice == "➕ Sisesta uus tarnija...":
+                                new_supplier_name = st.text_input("Uue tarnija nimi", placeholder="Sisesta uus tarnija nimi siia")
+                                actual_supplier_name = "- Puudub -"
+                            else: actual_supplier_name = db_sup_choice
+
+                        c_options, n_options = [""], [""]
+                        if actual_supplier_name not in ["- Puudub -", "🌍 Otsi andmebaasist / Lisa uus..."]:
+                            t_codes = db.query(Transaction.supplier_code).join(Supplier).filter(Transaction.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
+                            o_codes = db.query(PurchaseOrder.supplier_code).join(Supplier).filter(PurchaseOrder.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
+                            c_options = sorted([c[0] for c in t_codes + o_codes if c[0]])
+                            
+                            t_names = db.query(Transaction.supplier_product_name).join(Supplier).filter(Transaction.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
+                            o_names = db.query(PurchaseOrder.supplier_product_name).join(Supplier).filter(PurchaseOrder.product_id == prod['id'], Supplier.name == actual_supplier_name).distinct().all()
+                            n_options = sorted([n[0] for n in t_names + o_names if n[0]])
+
+                        sc_col1, sc_col2 = st.columns(2)
+                        with sc_col1:
+                            sup_code = st.selectbox("Tarnija kood", options=c_options + ["➕ Sisesta uus..."]) if c_options else st.text_input("Tarnija kood")
+                            if sup_code == "➕ Sisesta uus...": sup_code = st.text_input("Uus tarnija kood", placeholder="Sisesta kood siia")
+                        with sc_col2:
+                            sup_prod_name = st.selectbox("Tarnija toote nimetus", options=n_options + ["➕ Sisesta uus..."]) if n_options else st.text_input("Tarnija toote nimetus")
+                            if sup_prod_name == "➕ Sisesta uus...": sup_prod_name = st.text_input("Uus toote nimetus", placeholder="Sisesta nimetus siia")
+                        
+                    st.markdown("---")
+                    notes = st.text_input("Kommentaar (valikuline)", placeholder="nt. Arve nr / Saateleht...")
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("💾 Salvesta kanne", use_container_width=True):
+                        handle_transaction_save(db, prod, qty, price, notes, is_in_transaction, action_type, actual_supplier_name, db_sup_choice, new_supplier_name, sup_code, sup_prod_name, active_unit)
+
+    with tab_excel:
+        st.markdown("Lisa korraga mitu kannet Exceli abil (sobib hästi ka vana süsteemi ajaloo importimiseks).")
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.subheader("1. Laadi mall alla")
+            if is_in_transaction:
+                template_df = pd.DataFrame([{
+                    "Tootekood": "KOOD001", "Nimetus": "Kruvi 5x50", "Kogus": 100, "Hind": 1.5,
+                    "Tarnija": "Tarnija OÜ", "Tarnija kood": "T-123", "Tarnija toote nimetus": "Kruvi 5x50 (pakk)", "Kommentaar": "Algandmete import"
+                }])
+            else:
+                template_df = pd.DataFrame([{
+                    "Tootekood": "KOOD001", "Nimetus": "Kruvi 5x50", "Tegevus (TOOTMISSE või VÄLJAMINEK)": "TOOTMISSE",
+                    "Kogus": 50, "Kommentaar": "Vana süsteemi kulu import"
+                }])
             
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("💾 Salvesta kanne", use_container_width=True):
-                handle_transaction_save(db, prod, qty, price, notes, is_in_transaction, action_type, actual_supplier_name, db_sup_choice, new_supplier_name, sup_code, sup_prod_name, active_unit)
+            st.download_button(
+                label="📥 Kannete importimise mall (xlsx)", 
+                data=convert_df_to_excel(template_df), 
+                file_name=f"kannete_import_mall_{'sissetulek' if is_in_transaction else 'valjastus'}.xlsx", 
+                use_container_width=True
+            )
+            
+        with c2:
+            st.subheader("2. Laadi täidetud fail üles")
+            up_file = st.file_uploader("Vali fail (.xlsx)", type=["xlsx"], key="trans_excel_up")
+            
+        if up_file:
+            try:
+                df_up = pd.read_excel(up_file, engine='openpyxl', dtype=str)
+                st.markdown("### Eelvaade")
+                st.dataframe(df_up, use_container_width=True, hide_index=True)
+                
+                if st.button("💾 Salvesta kanded andmebaasi", type="primary", use_container_width=True):
+                    with st.spinner("Salvestan andmeid andmebaasi, palun oota..."):
+                        added_count = 0
+                        errors = []
+                        running_stocks = {}
+                        supplier_map = {s.name: s for s in db.query(Supplier).all()}
+                        
+                        for idx, row in df_up.iterrows():
+                            code = parse_str(row.get("Tootekood"))
+                            name = parse_str(row.get("Nimetus"))
+                            
+                            if not code and not name:
+                                continue
+                                
+                            p = None
+                            if code: p = db.query(Product).filter(Product.code == code).first()
+                            if not p and name: p = db.query(Product).filter(Product.name == name).first()
+                            
+                            if not p:
+                                errors.append(f"Rida {idx+2}: Toodet koodiga '{code or '-'}' ja nimega '{name or '-'}' ei leitud süsteemist!")
+                                continue
+                                
+                            qty = parse_float(row.get("Kogus"), 0.0)
+                            if qty <= 0:
+                                errors.append(f"Rida {idx+2}: Kogus on vigane või 0 (Toode: {p.name}).")
+                                continue
+                                
+                            notes = parse_str(row.get("Kommentaar")) or ""
+                            
+                            if is_in_transaction:
+                                price = parse_float(row.get("Hind"), 0.0)
+                                sup_name = parse_str(row.get("Tarnija"))
+                                sup_code = parse_str(row.get("Tarnija kood"))
+                                sup_prod_name = parse_str(row.get("Tarnija toote nimetus"))
+                                
+                                final_sup_id = None
+                                if sup_name:
+                                    if sup_name not in supplier_map:
+                                        new_sup = Supplier(name=sup_name)
+                                        db.add(new_sup)
+                                        db.flush()
+                                        supplier_map[sup_name] = new_sup
+                                    final_sup_id = supplier_map[sup_name].id
+                                    
+                                mult = p.conversion_multiplier or 1.0
+                                final_qty = qty * mult
+                                if is_discrete_unit(p.warehouse_unit): final_qty = round(final_qty)
+                                final_price = price / mult if mult else price
+                                
+                                final_notes = f"[Excel Import: {qty:g} {p.purchase_unit}] {notes}".strip() if mult != 1.0 else notes
+                                
+                                db.add(Transaction(
+                                    product_id=p.id, supplier_id=final_sup_id, supplier_code=sup_code, supplier_product_name=sup_prod_name,
+                                    type=TransactionType.IN_STOCK, quantity=final_qty, price=final_price, notes=final_notes
+                                ))
+                                added_count += 1
+                                
+                            else:
+                                action_val = parse_str(row.get("Tegevus (TOOTMISSE või VÄLJAMINEK)")) or "VÄLJAMINEK"
+                                t_type = TransactionType.TO_PROD if action_val.upper() == "TOOTMISSE" else TransactionType.OUT_STOCK
+                                
+                                if p.id not in running_stocks:
+                                    running_stocks[p.id] = get_product_main_stock(db, p.id)
+                                
+                                if qty > running_stocks[p.id]:
+                                    errors.append(f"Rida {idx+2}: Põhilaos pole piisavalt toodet '{p.name}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p.id]:g})")
+                                    continue
+                                    
+                                running_stocks[p.id] -= qty
+                                
+                                db.add(Transaction(
+                                    product_id=p.id, type=t_type, quantity=qty, price=0.0, notes=notes
+                                ))
+                                added_count += 1
+
+                        if errors:
+                            db.rollback()
+                            st.error("⚠️ Importimisel tekkisid vead (kogu tegevus on tühistatud):")
+                            for e in errors: st.write(e)
+                        elif added_count > 0:
+                            db.commit()
+                            trigger_db_update()
+                            st.session_state['trans_success'] = f"✅ Edukalt imporditi {added_count} kannet!"
+                            st.rerun()
+                        else:
+                            st.warning("Ühtegi korrektset kannet ei leitud (või olid kõik kogused 0).")
+                            
+            except Exception as e:
+                st.error(f"Viga faili lugemisel või töötlemisel: {e}")
 
 def handle_transaction_save(db, prod, qty, price, notes, is_in, action_type, act_sup_name, db_sup, new_sup, sup_code, sup_prod, act_unit):
     proceed, final_sup_id = True, None
@@ -1011,19 +1150,6 @@ def render_product_management(db):
                                 existing_codes = {p.code for p in db.query(Product.code).filter(Product.code.isnot(None)).all()}
                                 existing_names_groups = {(p.name, p.product_group) for p in db.query(Product.name, Product.product_group).all()}
                                 supplier_map = {s.name: s for s in db.query(Supplier).all()}
-
-                                def parse_float(val, default_val=0.0):
-                                    if pd.isna(val): return default_val
-                                    val_str = str(val).strip().lower()
-                                    if val_str in ['nan', 'none', 'null', '']: return default_val
-                                    try: return float(val_str.replace(',', '.'))
-                                    except (ValueError, TypeError): return default_val
-
-                                def parse_str(val):
-                                    if pd.isna(val): return None
-                                    val_str = str(val).strip()
-                                    if val_str.lower() in ['nan', 'none', 'null', '']: return None
-                                    return val_str
 
                                 for _, row in df_upload.iterrows():
                                     name = parse_str(row.get("Nimetus"))
