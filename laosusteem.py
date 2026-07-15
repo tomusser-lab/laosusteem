@@ -899,6 +899,7 @@ def render_orders(db):
                 st.error(f"⚠️ Viga: Google Sheetsi tabelist ei leitud kõiki vajalikke veerge (Nimetus/Kood, Kogus, Nädal). Tuvastatud veerud olid: {', '.join(df_gs.columns)}")
             else:
                 st.markdown("### 📊 Materjali vajaduse analüüs")
+                include_prod = st.checkbox("📦 Arvesta varuna ka 'Tootmises' olevat kaupa (nt raamitud, aga pakkimata detailid)", value=True, help="Kui see on sisse lülitatud, ei soovita süsteem tellida materjali, mis on juba põhilaost tootmisesse kantud.")
                 
                 # Optimeeritud otsing
                 prod_opts = get_cached_product_options(st.session_state.db_update_counter).values()
@@ -906,8 +907,13 @@ def render_orders(db):
                 name_map = {p['name']: p for p in prod_opts}
                 
                 _, inventory_data, _, _, _ = get_cached_inventory(st.session_state.db_update_counter)
-                stock_by_code = {item["Tootekood"]: item["Põhiladu"] for item in inventory_data if item["Tootekood"] != "-"}
-                stock_by_name = {item["Nimetus"]: item["Põhiladu"] for item in inventory_data}
+                
+                if include_prod:
+                    stock_by_code = {item["Tootekood"]: item["Põhiladu"] + item["Tootmises"] for item in inventory_data if item["Tootekood"] != "-"}
+                    stock_by_name = {item["Nimetus"]: item["Põhiladu"] + item["Tootmises"] for item in inventory_data}
+                else:
+                    stock_by_code = {item["Tootekood"]: item["Põhiladu"] for item in inventory_data if item["Tootekood"] != "-"}
+                    stock_by_name = {item["Nimetus"]: item["Põhiladu"] for item in inventory_data}
                 
                 running_stock = {}
                 analysis_results = []
