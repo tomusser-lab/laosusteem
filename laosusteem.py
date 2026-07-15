@@ -1276,31 +1276,51 @@ def render_suppliers(db):
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
     with t2:
-        if not suppliers:
-            st.info("Tarnijaid saab süsteemi luua läbi 'Sissetulek' või 'Ostutellimused' vaate.")
-        else:
-            col1, _ = st.columns([2, 1])
-            with col1:
-                sup_opts = {s.name: s for s in suppliers}
-                sel_sup_name = st.selectbox("Vali tarnija keda muuta:", ["Vali..."] + list(sup_opts.keys()))
+        col1, _ = st.columns([2, 1])
+        with col1:
+            sup_opts = {s.name: s for s in suppliers}
+            options = ["Vali...", "➕ Lisa uus tarnija..."] + list(sup_opts.keys())
+            sel_sup_name = st.selectbox("Vali tegevus:", options)
+            
+            if sel_sup_name != "Vali...":
+                is_new = (sel_sup_name == "➕ Lisa uus tarnija...")
+                active_sup = None if is_new else sup_opts[sel_sup_name]
                 
-                if sel_sup_name != "Vali...":
-                    active_sup = sup_opts[sel_sup_name]
+                with st.form("supplier_edit_form"):
+                    st.subheader("Uue tarnija lisamine" if is_new else f"Muuda: {active_sup.name}")
+                    new_name = st.text_input("Tarnija ärinimi (kohustuslik)", value="" if is_new else active_sup.name)
+                    new_contact = st.text_input("Kontaktisiku nimi", value="" if is_new else (active_sup.contact_person or ""))
+                    new_email = st.text_input("E-mail", value="" if is_new else (active_sup.email or ""))
+                    new_phone = st.text_input("Telefoninumber", value="" if is_new else (active_sup.phone or ""))
                     
-                    with st.form("supplier_edit_form"):
-                        st.subheader(f"Muuda: {active_sup.name}")
-                        new_name = st.text_input("Tarnija ärinimi (kohustuslik)", value=active_sup.name)
-                        new_contact = st.text_input("Kontaktisiku nimi", value=active_sup.contact_person if active_sup.contact_person else "")
-                        new_email = st.text_input("E-mail", value=active_sup.email if active_sup.email else "")
-                        new_phone = st.text_input("Telefoninumber", value=active_sup.phone if active_sup.phone else "")
-                        
-                        if st.form_submit_button("💾 Salvesta muudatused", type="primary", use_container_width=True):
-                            if not new_name.strip():
-                                st.session_state['sup_error'] = "Tarnija nimi ei saa olla tühi!"
+                    submit_label = "➕ Lisa tarnija andmebaasi" if is_new else "💾 Salvesta muudatused"
+                    if st.form_submit_button(submit_label, type="primary", use_container_width=True):
+                        if not new_name.strip():
+                            st.session_state['sup_error'] = "Tarnija nimi ei saa olla tühi!"
+                            st.rerun()
+                        else:
+                            if is_new:
+                                existing = db.query(Supplier).filter(Supplier.name == new_name.strip()).first()
+                                if existing:
+                                    st.session_state['sup_error'] = "Sellise nimega tarnija on juba olemas!"
+                                    st.rerun()
+                                else:
+                                    new_s = Supplier(
+                                        name=new_name.strip(),
+                                        contact_person=new_contact.strip() or None,
+                                        email=new_email.strip() or None,
+                                        phone=new_phone.strip() or None
+                                    )
+                                    db.add(new_s)
+                                    db.commit()
+                                    trigger_db_update()
+                                    st.session_state['sup_success'] = f"Tarnija '{new_name.strip()}' andmed edukalt lisatud!"
+                                    st.rerun()
                             else:
                                 existing = db.query(Supplier).filter(Supplier.name == new_name.strip(), Supplier.id != active_sup.id).first()
                                 if existing:
                                     st.session_state['sup_error'] = "Sellise nimega tarnija on juba olemas!"
+                                    st.rerun()
                                 else:
                                     active_sup.name = new_name.strip()
                                     active_sup.contact_person = new_contact.strip() or None
