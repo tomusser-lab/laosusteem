@@ -748,15 +748,18 @@ def render_orders(db):
                         act_sup = "- Puudub -"
                     else: act_sup = db_sup
 
-                # Näita tarnija kontakte uue funktsionaalsusena
+                # Näita tarnija kontakte uue funktsionaalsusena ALATI
                 if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
                     s_obj = db.query(Supplier).filter(Supplier.name == act_sup).first()
-                    if s_obj and (s_obj.email or s_obj.phone or s_obj.contact_person):
-                        details = []
-                        if s_obj.contact_person: details.append(f"👤 {s_obj.contact_person}")
-                        if s_obj.email: details.append(f"📧 {s_obj.email}")
-                        if s_obj.phone: details.append(f"📞 {s_obj.phone}")
-                        st.info(" **Tarnija kontaktid:** " + " | ".join(details))
+                    if s_obj:
+                        if s_obj.email or s_obj.phone or s_obj.contact_person:
+                            details = []
+                            if s_obj.contact_person: details.append(f"👤 {s_obj.contact_person}")
+                            if s_obj.email: details.append(f"📧 {s_obj.email}")
+                            if s_obj.phone: details.append(f"📞 {s_obj.phone}")
+                            st.info("ℹ️ **Tarnija kontaktid:** " + " | ".join(details))
+                        else:
+                            st.info("ℹ️ Sellel tarnijal pole veel kontakte lisatud. Saad need lisada 'Tarnijate haldus' lehelt.")
                         
                 c_opt, n_opt = [""], [""]
                 if act_sup not in ["- Puudub -", "🌍 Otsi andmebaasist..."]:
