@@ -878,19 +878,89 @@ def render_orders(db):
              
             if sel != "Vali...":
                 o = opts[sel]
+                
+                # --- TELLIMUSE MUUTMINE ---
+                with st.expander("✏️ Muuda tellimuse andmeid"):
+                    with st.form(key=f"edit_po_{o.id}"):
+                        e_c1, e_c2, e_c3 = st.columns(3)
+                        with e_c1: e_qty = st.number_input("Kogus", value=float(o.quantity), min_value=0.001)
+                        with e_c2: e_price = st.number_input("Hind (€)", value=float(o.price), min_value=0.0)
+                        with e_c3: e_date = st.date_input("Lubatud tarneaeg", value=o.expected_delivery_date if o.expected_delivery_date else get_estonian_time().date())
+                        
+                        if st.form_submit_button("💾 Salvesta muudatused"):
+                            o.quantity = e_qty
+                            o.price = e_price
+                            o.expected_delivery_date = e_date
+                            db.commit()
+                            trigger_db_update()
+                            st.session_state['order_success'] = f"Tellimus #{o.id} edukalt muudetud!"
+                            st.rerun()
+
+                # --- OSALISE TARNE TUGI ---
+                st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+                r_c1, r_c2 = st.columns([1, 2])
+                with r_c1:
+                    recv_qty = st.number_input(f"Saabunud kogus ({o.product.purchase_unit})", value=float(o.quantity), min_value=0.001)
+                with r_c2:
+                    st.info("💡 Kui saabunud kogus on väiksem kui tellitud, luuakse ülejäägile automaatselt uus ootel tellimus.")
+
+                st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
                 c1, c2, c3, c4 = st.columns(4)
+                
                 if c1.button("📦 Võta lattu arvele", type="primary", use_container_width=True):
-                    o.status = OrderStatus.RECEIVED; o.arrival_date = get_estonian_time().date()
+                    orig_qty = o.quantity
+                    if recv_qty < orig_qty:
+                        # Loome puuduolevale osale uue tellimuse
+                        new_po = PurchaseOrder(
+                            product_id=o.product_id, supplier_id=o.supplier_id,
+                            supplier_code=o.supplier_code, supplier_product_name=o.supplier_product_name,
+                            order_date=o.order_date, expected_delivery_date=o.expected_delivery_date,
+                            quantity=(orig_qty - recv_qty), price=o.price, status=OrderStatus.PENDING
+                        )
+                        db.add(new_po)
+                        o.quantity = recv_qty # Uuendame praeguse tellimuse vastuvõetud kogusele vastavaks
+
+                    o.status = OrderStatus.RECEIVED
+                    o.arrival_date = get_estonian_time().date()
+                    
                     mult = o.product.conversion_multiplier or 1.0
-                    f_qty = round(o.quantity * mult) if is_discrete_unit(o.product.warehouse_unit) else (o.quantity * mult)
-                    db.add(Transaction(product_id=o.product.id, supplier_id=o.supplier_id, type=TransactionType.IN_STOCK, quantity=f_qty, price=(o.price/mult if mult else o.price), notes=f"Tellimus #{o.id} [Ost: {o.quantity:g}]"))
-                    db.commit(); trigger_db_update(); st.session_state['order_success'] = "Lattu võetud!"; st.session_state['ord_k']+=1; st.rerun()
+                    f_qty = round(recv_qty * mult) if is_discrete_unit(o.product.warehouse_unit) else (recv_qty * mult)
+                    
+                    db.add(Transaction(
+                        product_id=o.product.id, supplier_id=o.supplier_id, 
+                        supplier_code=o.supplier_code, supplier_product_name=o.supplier_product_name,
+                        type=TransactionType.IN_STOCK, quantity=f_qty, price=(o.price/mult if mult else o.price), 
+                        notes=f"Tellimus #{o.id} [Ost: {recv_qty:g}]"
+                    ))
+                    db.commit(); trigger_db_update()
+                    if recv_qty < orig_qty:
+                        st.session_state['order_success'] = f"Lattu võetud {recv_qty:g}! Puuduolevale osale ({orig_qty - recv_qty:g}) loodi uus ootel tellimus."
+                    else:
+                        st.session_state['order_success'] = "Lattu võetud!"
+                    st.session_state['ord_k']+=1; st.rerun()
+                    
                 if c2.button("🚚 Märgi saabunuks", use_container_width=True):
+                    orig_qty = o.quantity
+                    if recv_qty < orig_qty:
+                        new_po = PurchaseOrder(
+                            product_id=o.product_id, supplier_id=o.supplier_id,
+                            supplier_code=o.supplier_code, supplier_product_name=o.supplier_product_name,
+                            order_date=o.order_date, expected_delivery_date=o.expected_delivery_date,
+                            quantity=(orig_qty - recv_qty), price=o.price, status=OrderStatus.PENDING
+                        )
+                        db.add(new_po)
+                        o.quantity = recv_qty
+                        
                     o.status = OrderStatus.RECEIVED; o.arrival_date = get_estonian_time().date()
-                    db.commit(); trigger_db_update(); st.session_state['order_success'] = "Märgiti saabunuks!"; st.session_state['ord_k']+=1; st.rerun()
+                    db.commit(); trigger_db_update()
+                    st.session_state['order_success'] = "Märgiti saabunuks!" if recv_qty >= orig_qty else "Osaliselt märgitud saabunuks, ülejäägile loodi uus tellimus!"
+                    st.session_state['ord_k']+=1; st.rerun()
+                    
                 if c3.button("❌ Tühista", use_container_width=True):
                     o.status = OrderStatus.CANCELLED; db.commit(); trigger_db_update(); st.session_state['ord_k']+=1; st.rerun()
-                if c4.button("🔙 Sulge", use_container_width=True): st.session_state['ord_k']+=1; st.rerun()
+                    
+                if c4.button("🔙 Sulge", use_container_width=True): 
+                    st.session_state['ord_k']+=1; st.rerun()
         else: st.info("Ootel tellimusi hetkel pole.")
          
     with tab_hist:
