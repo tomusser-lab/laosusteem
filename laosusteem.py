@@ -976,11 +976,18 @@ def render_orders(db):
                 def highlight_deficit(val):
                     return 'color: #EF4444; font-weight: 700;' if isinstance(val, (int, float)) and val > 0 else ''
                 
-                if not df_analysis.empty:
+<comment-tag id="1">                if not df_analysis.empty:
                     st.dataframe(df_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({"Vaja (tk/m)": "{:g}", "Laos vaba enne": "{:g}", "Puudu (Telli)": "{:g}"}), use_container_width=True, hide_index=True, height=500)
                     
-                    if len(orders_to_create) > 0:
-                        st.warning(f"⚠️ Analüüs näitab, et sul jääb tuleviku vajaduste katmiseks puudu {len(orders_to_create)} artiklit. Vajuta nuppu, et luua neile automaatselt ootel ostutellimused.")
+                    if len(orders_to_create) > 0:</comment-tag id="1" text="Lisasin siia tulpade jaotuse, et Exceli allalaadimise nupp paigutuks ilusti tabeli kohale paremasse äärde.
+Asenduskood:
+                if not df_analysis.empty:
+                    dl_col1, dl_col2 = st.columns([3, 1])
+                    with dl_col2:
+                        render_excel_download(df_analysis, 'materjalivajadus')
+                    st.dataframe(df_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({'Vaja (tk/m)': '{:g}', 'Laos vaba enne': '{:g}', 'Puudu (Telli)': '{:g}'}), use_container_width=True, hide_index=True, height=500)
+                    
+                    if len(orders_to_create) > 0:" type="suggestion">                        st.warning(f"⚠️ Analüüs näitab, et sul jääb tuleviku vajaduste katmiseks puudu {len(orders_to_create)} artiklit. Vajuta nuppu, et luua neile automaatselt ootel ostutellimused.")
                         if st.button("🛒 Koosta tellimused PUUDUOLEVATELE kogustele", type="primary", use_container_width=True):
                             added_orders = 0
                             for item in orders_to_create:
