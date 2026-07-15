@@ -1243,7 +1243,19 @@ def render_suppliers(db):
                     "Telefon": s.phone or "-"
                 })
             df_sup = pd.DataFrame(sup_data)
-            st.dataframe(df_sup, use_container_width=True, hide_index=True)
+            
+            with st.expander("🔍 Otsing", expanded=True):
+                search_query = st.text_input("Otsi tarnija nime, kontakti, e-maili või telefoni järgi...", key="sup_search")
+                
+            if search_query:
+                # Otsime teksti kõikidest veergudest (case-insensitive)
+                mask = df_sup.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
+                filtered_df = df_sup[mask]
+            else:
+                filtered_df = df_sup
+                
+            st.markdown(f"<div style='margin-bottom: 1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Leitud {len(filtered_df)} tarnijat</span></div>", unsafe_allow_html=True)
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
     with t2:
         if not suppliers:
