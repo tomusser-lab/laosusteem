@@ -382,12 +382,15 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #F8FAFC; }
     
-    /* PEALEHE JA KÜLGMENÜÜ ÜHTLANE JOONDUS MAKSIMAALSELT ÜLEVAL */
-    /* Lükkab parempoolset sisu ülespoole */
-    .main .block-container { padding-top: 1rem !important; margin-top: -6.5rem !important; }
-    /* Vasakpoolne menüü püsib oma heal kõrgusel */
-    [data-testid="stSidebarUserContent"] { padding-top: 1.5rem !important; margin-top: -3.5rem !important; }
-    header[data-testid="stHeader"] { z-index: 0 !important; background: transparent !important; height: 0px !important; }
+    /* PEIDA STREAMLITI ÜLEMINE TÜHI RIBA TÄIELIKULT (mis surub muidu paremat sisu alla) */
+    header[data-testid="stHeader"] { display: none !important; }
+    
+    /* VASAKMENÜÜ JOONDUS */
+    [data-testid="stSidebarUserContent"] { padding-top: 2rem !important; }
+    
+    /* PAREMA SISUALA JOONDUS - Tõmbame jõuliselt üles, kasutades moodsaid andmetribuute */
+    [data-testid="stAppViewBlockContainer"] { padding-top: 1rem !important; margin-top: -3.5rem !important; }
+    .block-container { padding-top: 1rem !important; margin-top: -3.5rem !important; }
     
     h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
     h2, h3 { color: #1E293B; font-weight: 600; letter-spacing: -0.5px; }
@@ -442,7 +445,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.5 (Täpne joondus)")
+st.sidebar.caption("Versioon 14.6 (Absoluutne joondus)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
