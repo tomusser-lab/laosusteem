@@ -129,8 +129,9 @@ class ProductStructure(Base):
     parent_product = relationship("Product", foreign_keys=[parent_product_id])
     component_product = relationship("Product", foreign_keys=[component_product_id])
  
+# Funktsiooni nime muutmine sunnib Streamlitil vahemälu tühjendama ja uut tabelit looma!
 @st.cache_resource(show_spinner=False)
-def init_database_connection():
+def init_database_connection_v2():
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, pool_recycle=1800
     )
@@ -177,7 +178,7 @@ def init_database_connection():
              
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
  
-SessionLocal = init_database_connection()
+SessionLocal = init_database_connection_v2()
  
 # ==========================================
 # 2. ABIFUNKTSIOONID JA OPTIMEERITUD PÄRINGUD
