@@ -383,8 +383,8 @@ st.markdown("""
     .stApp { background-color: #F8FAFC; }
     
     /* PEALEHE JA KÜLGMENÜÜ ÜHTLANE JOONDUS MAKSIMAALSELT ÜLEVAL */
-    .main .block-container { padding-top: 1rem !important; margin-top: -6rem !important; }
-    [data-testid="stSidebarUserContent"] { padding-top: 1rem !important; margin-top: -6rem !important; }
+    .main .block-container { padding-top: 1.5rem !important; margin-top: -4.5rem !important; }
+    [data-testid="stSidebarUserContent"] { padding-top: 1.5rem !important; margin-top: -3.5rem !important; }
     header[data-testid="stHeader"] { z-index: 0 !important; background: transparent !important; height: 0px !important; }
     
     h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
@@ -440,7 +440,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.3 (Ülajoondus max)")
+st.sidebar.caption("Versioon 14.4 (Lõplik joondus)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -751,7 +751,7 @@ def render_transactions(db, is_in_transaction):
                                     running_stocks[p_info['id']] = main_stock_by_code.get(p_info['code'], main_stock_by_name.get(p_info['name'], 0.0))
                                  
                                 if qty > running_stocks[p_info['id']]:
-                                    errors.append(f"Rida {idx+2}: Põhilaos pole piisavalt toodet '{p_info['name']}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p_info['id']]:g})")
+                                    errors.append(f"Rida {idx+2}: Põhilaos pole pole piisavalt toodet '{p_info['name']}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p_info['id']]:g})")
                                     continue
                                     
                                 running_stocks[p_info['id']] -= qty
