@@ -118,6 +118,16 @@ class PurchaseOrder(Base):
     status = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
     product = relationship("Product", back_populates="purchase_orders")
     supplier = relationship("Supplier", back_populates="purchase_orders")
+
+class ProductStructure(Base):
+    __tablename__ = "product_structures"
+    id = Column(Integer, primary_key=True, index=True)
+    parent_product_id = Column(Integer, ForeignKey("products.id"), index=True)
+    component_product_id = Column(Integer, ForeignKey("products.id"), index=True)
+    quantity = Column(Float, nullable=False, default=1.0)
+    
+    parent_product = relationship("Product", foreign_keys=[parent_product_id])
+    component_product = relationship("Product", foreign_keys=[component_product_id])
  
 @st.cache_resource(show_spinner=False)
 def init_database_connection():
@@ -409,10 +419,10 @@ st.sidebar.markdown("""
  
 menyuu_valik = st.sidebar.radio("Menüü", [
     "📊 Ladu ja Töölaud", "📋 Tootekataloog", "📥 Sissetulek", "📤 Väljastus / Tootmine", 
-    "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
+    "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "🧩 Toote struktuurid (BOM)", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 12.3 (Maksimaalne jõudlus)")
+st.sidebar.caption("Versioon 13.0 (Toote struktuurid)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -1575,6 +1585,102 @@ def render_history(db):
         st.dataframe(df.style.map(lambda v: format_color_status(v, {'Väljaminek (OUT)'}, {'Sissetulek (IN)'}, {'Kanti tootmisse (TO_PROD)'}, {'Tagastus (RETURN)'}, {'Tootmise kulu (PROD_CONS)'}), subset=['Tüüp']).format({"Kogus": "{:g}", "Hind (€)": "{:.2f}"}), use_container_width=True, hide_index=True, height=600)
     else: st.info("Kandeid ei leitud.")
  
+def render_product_structures(db):
+    st.title("🧩 Toote struktuurid (Retseptid / BOM)")
+    st.markdown("Määra siin, millistest komponentidest toode koosneb. See aitab tulevikus tootmisest lattu kandes võtta komponendid automaatselt laost maha ning näitab eelkalkuleeritud omahinda.")
+    
+    if 'bom_success' in st.session_state: st.success(st.session_state.pop('bom_success'))
+    if 'bom_error' in st.session_state: st.error(st.session_state.pop('bom_error'))
+
+    product_options = get_cached_product_options(st.session_state.db_update_counter)
+    prod_names = list(product_options.keys())
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("1. Vali peatoode")
+        selected_parent_str = st.selectbox("Otsi toodet (mida toodetakse)", options=["Vali..."] + prod_names, key="bom_parent")
+        
+        if selected_parent_str != "Vali...":
+            parent_prod = product_options[selected_parent_str]
+            
+            st.markdown("---")
+            st.subheader("➕ Lisa komponent")
+            with st.form("add_component_form"):
+                selected_comp_str = st.selectbox("Otsi komponenti (materjali)", options=["Vali..."] + prod_names)
+                comp_qty = st.number_input(f"Kogus (ühe '{parent_prod['name']}' valmistamiseks)", min_value=0.0001, value=1.0, format="%f")
+                
+                if st.form_submit_button("💾 Lisa komponent struktuuri", type="primary", use_container_width=True):
+                    if selected_comp_str == "Vali...":
+                        st.session_state['bom_error'] = "Vali komponent!"
+                    elif selected_comp_str == selected_parent_str:
+                        st.session_state['bom_error'] = "Toode ei saa olla iseenda komponent!"
+                    else:
+                        comp_prod = product_options[selected_comp_str]
+                        
+                        existing = db.query(ProductStructure).filter(
+                            ProductStructure.parent_product_id == parent_prod['id'],
+                            ProductStructure.component_product_id == comp_prod['id']
+                        ).first()
+                        
+                        if existing:
+                            existing.quantity += comp_qty
+                        else:
+                            db.add(ProductStructure(
+                                parent_product_id=parent_prod['id'],
+                                component_product_id=comp_prod['id'],
+                                quantity=comp_qty
+                            ))
+                        db.commit()
+                        trigger_db_update()
+                        st.session_state['bom_success'] = "Komponent edukalt struktuuri lisatud!"
+                    st.rerun()
+
+    with col2:
+        st.subheader("2. Olemasolev struktuur")
+        if selected_parent_str != "Vali...":
+            parent_id = product_options[selected_parent_str]['id']
+            structures = db.query(ProductStructure).options(
+                joinedload(ProductStructure.component_product)
+            ).filter(ProductStructure.parent_product_id == parent_id).all()
+            
+            if structures:
+                struct_data = []
+                total_cost = 0.0
+                for s in structures:
+                    cp = s.component_product
+                    cost = (cp.default_price or 0.0) * s.quantity
+                    total_cost += cost
+                    struct_data.append({
+                        "ID": s.id,
+                        "Kood": cp.code or "-",
+                        "Komponent": cp.name,
+                        "Kogus": s.quantity,
+                        "Ühik": cp.warehouse_unit,
+                        "Kulu/tk (€)": cost
+                    })
+                
+                df_s = pd.DataFrame(struct_data)
+                st.dataframe(df_s.drop(columns=["ID"]).format({"Kogus": "{:g}", "Kulu/tk (€)": "{:.2f}"}), use_container_width=True, hide_index=True)
+                
+                st.info(f"💡 **Ühe {parent_prod['warehouse_unit']}** tootmise hinnanguline materjalikulu: **{total_cost:.2f} €**")
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                del_opts = {f"{r['Komponent']} ({r['Kogus']:g} {r['Ühik']})": r['ID'] for r in struct_data}
+                del_sel = st.selectbox("Eemalda komponent struktuurist:", ["Vali komponent kustutamiseks..."] + list(del_opts.keys()))
+                if st.button("❌ Eemalda komponent", use_container_width=True) and del_sel != "Vali komponent kustutamiseks...":
+                    struct_to_del = db.query(ProductStructure).get(del_opts[del_sel])
+                    if struct_to_del:
+                        db.delete(struct_to_del)
+                        db.commit()
+                        trigger_db_update()
+                        st.session_state['bom_success'] = "Komponent eemaldatud!"
+                        st.rerun()
+            else:
+                st.info(f"Tootel **{parent_prod['name']}** pole veel komponente lisatud.")
+        else:
+            st.caption("Vali vasakult peatoode, et näha selle struktuuri.")
+
  
 # ==========================================
 # 5. PEAMINE ROUTER TRY/FINALLY PLOKIS
@@ -1587,6 +1693,7 @@ with SessionLocal() as db:
     elif menyuu_valik in ["📥 Sissetulek", "📤 Väljastus / Tootmine"]: render_transactions(db, menyuu_valik == "📥 Sissetulek")
     elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
     elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
+    elif menyuu_valik == "🧩 Toote struktuurid (BOM)": render_product_structures(db)
     elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
     elif menyuu_valik == "🏢 Tarnijate haldus": render_suppliers(db)
     elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
