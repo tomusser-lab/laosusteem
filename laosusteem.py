@@ -382,22 +382,35 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #F8FAFC; }
     
-    /* PEIDA STREAMLITI ÜLEMINE TÜHI RIBA TÄIELIKULT */
+    /* ÜLEMISE VALGE RIBA (HEADER) PEITMINE */
     header[data-testid="stHeader"] { display: none !important; }
     
-    /* EEMALDA VASAKULT TÜHI LEHTEDE MENÜÜ RIBA, mis lükkab sisu alla */
+    /* PAREMPOOLSE SISUALA KÕRGUSE JA JOONDUSE SEADISTAMINE */
+    .main .block-container { 
+        padding-top: 2rem !important; 
+        margin-top: 0rem !important; 
+    }
+    
+    /* VASAKPOOLSE KÜLGMENÜÜ (SIDEBAR) KÕRGUSE JA JOONDUSE SEADISTAMINE */
+    /* Eemaldab menüü tühja navigeerimisbloki */
     [data-testid="stSidebarNav"] { display: none !important; }
+    /* Eemaldab sidebar'i enda sisemise vaikimisi tühimiku (tõmbab sisu üles) */
+    [data-testid="stSidebar"] { 
+        background-color: #FFFFFF; 
+        border-right: 1px solid #E2E8F0; 
+        padding-top: 0rem !important; 
+    }
+    /* Joondab sisu vasakpoolses menüüs */
+    [data-testid="stSidebarUserContent"] { 
+        padding-top: 2.2rem !important; 
+        margin-top: 0rem !important; 
+    }
     
-    /* TÄPNE JA ÜHTLANE KÕRGUS MÕLEMALE POOLELE */
-    /* Mõlemale poolele täpselt sama padding-top, nii jooksevad pealkirjad horisontaalselt ideaalselt kokku */
-    [data-testid="stSidebarUserContent"] { padding-top: 2.5rem !important; }
-    [data-testid="stAppViewBlockContainer"] { padding-top: 2.5rem !important; margin-top: 0rem !important; }
-    .block-container { padding-top: 2.5rem !important; margin-top: 0rem !important; }
-    
-    /* Nullime pealkirjade vaikimisi lisatavad tühikud, et nad alustaksid kasti ülemisest äärest */
+    /* Nullime pealkirjade vaikimisi lisatavad tühikud */
     h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
     h2, h3 { color: #1E293B; font-weight: 600; letter-spacing: -0.5px; }
      
+    /* Komponentide stiilid */
     [data-testid="stMetric"] { background-color: #FFFFFF; border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; transition: transform 0.2s ease; }
     [data-testid="stMetric"]:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -3px rgba(0,0,0,0.08); }
     [data-testid="stMetricValue"] { font-size: 2.4rem; color: #2563EB; font-weight: 800; }
@@ -406,7 +419,6 @@ st.markdown("""
     .stButton>button { border-radius: 12px; font-weight: 600; background: #2563EB; color: white; border: none; padding: 0.6rem 1.5rem; transition: all 0.2s ease; }
     .stButton>button:hover { background: #1D4ED8; transform: translateY(-2px); box-shadow: 0 6px 12px -2px rgba(37, 99, 235, 0.3); color: white; }
      
-    [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2E8F0; }
     [data-testid="stSidebar"] .stRadio > div > label > div:first-child { display: none; }
     [data-testid="stSidebar"] .stRadio > div > label { background-color: transparent; padding: 0.8rem 1rem; border-radius: 12px; margin-bottom: 0.2rem; cursor: pointer; }
     [data-testid="stSidebar"] .stRadio > div > label p { font-size: 1.05rem; font-weight: 600; color: #475569; margin: 0; }
@@ -424,7 +436,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-bottom: 1rem; margin-top: -0.5rem;">
+    <div style="text-align: center; padding-bottom: 1rem;">
         <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
         <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
