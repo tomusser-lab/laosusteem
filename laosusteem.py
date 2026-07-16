@@ -980,7 +980,6 @@ def render_orders(db):
          
     with tab_gsheets:
         st.markdown("Tõmba **ostuvajadused** automaatselt Google Sheetsist ja võrdle neid **laoseisuga**.")
-        st.info("💡 **Nõuded Google Sheets dokumendile:**\n1. Dokument peab olema avalik (Kõik, kellel on link, saavad vaadata).\n2. Tabelis peavad olema veerud, kus sisalduvad sõnad: **Nimetus** (või Kood), **Kogus** ja **Nädal**.")
          
         gsheet_url = st.text_input("Kleebi Google Sheetsi avalik link siia (koos õige lehe #gid parameetriga):")
          
