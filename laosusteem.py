@@ -321,7 +321,7 @@ def get_cached_product_supplier_history(update_trigger, product_id):
         last_sup_name, last_date = None, None
  
         for name, code, pname, tdate in tx_rows:
-            _ = details[name]  # VÄLDIB STREAMLIT MAGIC'ut (omistab tühjale muutujale)
+            _ = details[name]  # VÄLDIB STREAMLIT MAGIC'ut
             if code: details[name]["codes"].add(code)
             if pname: details[name]["names"].add(pname)
             if last_date is None or tdate > last_date:
@@ -399,7 +399,7 @@ menyuu_valik = st.sidebar.radio("Menüü", [
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 12.1 (Optimeeritud jõudlus)")
+st.sidebar.caption("Versioon 12.2 (Kiirendatud)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -640,9 +640,13 @@ def render_transactions(db, is_in_transaction):
                         prod_opts = get_cached_product_options(st.session_state.db_update_counter).values()
                         code_map = {p['code']: p for p in prod_opts if p['code']}
                         name_map = {p['name']: p for p in prod_opts}
+                        
+                        # Väldime iga tsükli sammus andmebaasist laoseisu pärimist. Tõmbame kogu laoseisu korraga alla.
+                        _, inventory_data, _, _, _ = get_cached_inventory(st.session_state.db_update_counter)
+                        main_stock_by_code = {item["Tootekood"]: item["Põhiladu"] for item in inventory_data if item["Tootekood"] != "-"}
+                        main_stock_by_name = {item["Nimetus"]: item["Põhiladu"] for item in inventory_data}
                          
                         # Loo kõik uued tarnijad ette, ÜHE flushiga, mitte esimese esinemise ajal tsüklis.
-                        # Nii jäävad hiljem lisatavad Transaction read üheks katkematuks batchiks kuni commitini.
                         if is_in_transaction and "Tarnija" in df_up.columns:
                             file_sup_names = {parse_str(v) for v in df_up["Tarnija"]} - {None}
                             new_sup_names = file_sup_names - set(supplier_map.keys())
@@ -653,7 +657,8 @@ def render_transactions(db, is_in_transaction):
                             if new_sup_names:
                                 db.flush()
                          
-                        for idx, row in df_up.iterrows():
+                        # KIIRENDUS: iterrows asemel to_dict('records') on 10x-50x kiirem massilisel impordil!
+                        for idx, row in enumerate(df_up.to_dict('records')):
                             code = parse_str(row.get("Tootekood"))
                             name = parse_str(row.get("Nimetus"))
                              
@@ -701,7 +706,8 @@ def render_transactions(db, is_in_transaction):
                                 t_type = TransactionType.TO_PROD if action_val.upper() == "TOOTMISSE" else TransactionType.OUT_STOCK
                                  
                                 if p_info['id'] not in running_stocks:
-                                    running_stocks[p_info['id']] = get_product_main_stock(db, p_info['id'])
+                                    # Kasutame eelsalvestatud laoseisu dictionariesi (N+1 päringute vältimiseks)
+                                    running_stocks[p_info['id']] = main_stock_by_code.get(p_info['code'], main_stock_by_name.get(p_info['name'], 0.0))
                                  
                                 if qty > running_stocks[p_info['id']]:
                                     errors.append(f"Rida {idx+2}: Põhilaos pole piisavalt toodet '{p_info['name']}' (Soovitud: {qty:g}, Saadaval: {running_stocks[p_info['id']]:g})")
@@ -902,7 +908,8 @@ def render_orders(db):
                 with r_c1:
                     recv_qty = st.number_input(f"Saabunud kogus ({o.product.purchase_unit})", value=float(o.quantity), min_value=0.001)
                 with r_c2:
-                    st.write("") # Tekitab tühja rea, mis ühtlustab kasti kõrguse vasakpoolse labeliga
+                    # KASUTAME KINDLAT KÕRGUST (et infokast ja 'Saabunud kogus' pealkiri oleks täpselt ühel joonel)
+                    st.markdown("<div style='height: 31px;'></div>", unsafe_allow_html=True)
                     st.info("💡 Kui saabunud kogus on väiksem kui tellitud, luuakse ülejäägile automaatselt uus ootel tellimus.")
 
                 st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
@@ -1040,7 +1047,8 @@ def render_orders(db):
                 except Exception:
                     df_gs_sorted = df_gs
                  
-                for _, row in df_gs_sorted.iterrows():
+                # KIIRENDUS: iterrows asemel to_dict('records')
+                for row in df_gs_sorted.to_dict('records'):
                     code_val = str(row.get(kood_col, "")).strip() if kood_col else ""
                     name_val = str(row.get(nimi_col, "")).strip() if nimi_col else ""
                     week_val = str(row.get(nadal_col, "")).strip()
@@ -1173,15 +1181,16 @@ def render_inventory(db):
             code_map = {p['code']: p for p in prod_opts if p['code']}
             name_map = {p['name']: p for p in prod_opts}
  
-            for _, r in df.iterrows():
+            # KIIRENDUS: iterrows asemel to_dict('records')
+            for r in df.to_dict('records'):
                 try:
                     q_val = r.get(qty_col)
                     if pd.isna(q_val): continue
                     left_in_prod = float(q_val)
                     if left_in_prod < 0: continue
                      
-                    code_str = str(r["Tootekood"]).strip() if has_code and pd.notna(r["Tootekood"]) else ""
-                    name_str = str(r["Nimetus"]).strip() if has_name and pd.notna(r["Nimetus"]) else ""
+                    code_str = str(r.get("Tootekood", "")).strip() if has_code and pd.notna(r.get("Tootekood")) else ""
+                    name_str = str(r.get("Nimetus", "")).strip() if has_name and pd.notna(r.get("Nimetus")) else ""
                     if code_str.lower() == 'nan': code_str = ""
                     if name_str.lower() == 'nan': name_str = ""
                      
@@ -1330,7 +1339,8 @@ def render_product_management(db):
                                 pending = []  # (product_obj, supplier_name, sup_code, sup_prod_name, price)
                                 new_supplier_names = set()
  
-                                for _, row in df_upload.iterrows():
+                                # KIIRENDUS: iterrows asemel to_dict('records')
+                                for row in df_upload.to_dict('records'):
                                     name = parse_str(row.get("Nimetus"))
                                     if not name: continue
                                         
