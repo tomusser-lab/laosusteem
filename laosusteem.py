@@ -382,12 +382,12 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #F8FAFC; }
     
-    /* VÄHENDAME ÜLEMIST TÜHIMIKKU (Margineid ja Paddingut) */
-    .main .block-container { padding-top: 0rem !important; margin-top: -1rem !important; }
-    [data-testid="stSidebarUserContent"] { padding-top: 0rem !important; }
-    header[data-testid="stHeader"] { z-index: 0 !important; background: transparent !important; height: 30px !important; } /* Peidab / muudab ülemise valge riba väiksemaks */
+    /* PEALEHE JA KÜLGMENÜÜ ÜHTLANE JOONDUS */
+    .main .block-container { padding-top: 2rem !important; margin-top: -4.5rem !important; }
+    [data-testid="stSidebarUserContent"] { padding-top: 2rem !important; }
+    header[data-testid="stHeader"] { z-index: 0 !important; background: transparent !important; height: 0px !important; }
     
-    h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: -0.5rem !important; padding-top: 0 !important; }
+    h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
     h2, h3 { color: #1E293B; font-weight: 600; letter-spacing: -0.5px; }
      
     [data-testid="stMetric"] { background-color: #FFFFFF; border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; transition: transform 0.2s ease; }
@@ -416,7 +416,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-top: 0rem; padding-bottom: 1rem; margin-top: -1.5rem;">
+    <div style="text-align: center; padding-top: 0rem; padding-bottom: 1rem;">
         <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
         <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
@@ -440,7 +440,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.1 (Kompaktsem paigutus)")
+st.sidebar.caption("Versioon 14.2 (Joondus parandatud)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
