@@ -1096,14 +1096,42 @@ def render_orders(db):
                     return 'color: #EF4444; font-weight: 700;' if isinstance(val, (int, float)) and val > 0 else ''
                  
                 if not df_analysis.empty:
+                    # --- FILTRITE LISAMINE ---
+                    with st.expander("🔍 Otsing ja filtrid", expanded=True):
+                        f1, f2, f3, f4 = st.columns(4)
+                        with f1:
+                            all_weeks = sorted([w for w in df_analysis["Nädal"].unique() if w and w != "-"])
+                            f_week = st.multiselect("Nädal", options=all_weeks, key="gs_week")
+                        with f2:
+                            f_kood = st.text_input("Kood (osaline)", key="gs_kood")
+                        with f3:
+                            f_nimi = st.text_input("Nimetus (osaline)", key="gs_nimi")
+                        with f4:
+                            # Stiilime checkboxi, et see oleks kõrguselt joondatud
+                            st.markdown("<div style='margin-top: 1.75rem;'></div>", unsafe_allow_html=True)
+                            f_only_missing = st.checkbox("Näita ainult puuduvaid", key="gs_missing")
+
+                    # Rakendame filtrid
+                    filtered_analysis = df_analysis.copy()
+                    if f_week:
+                        filtered_analysis = filtered_analysis[filtered_analysis["Nädal"].isin(f_week)]
+                    if f_kood:
+                        filtered_analysis = filtered_analysis[filtered_analysis["Kood"].astype(str).str.contains(f_kood, case=False, na=False)]
+                    if f_nimi:
+                        filtered_analysis = filtered_analysis[filtered_analysis["Nimetus"].astype(str).str.contains(f_nimi, case=False, na=False)]
+                    if f_only_missing:
+                        filtered_analysis = filtered_analysis[filtered_analysis["Puudu (Telli)"] > 0]
+                        
+                    st.markdown(f"<div style='margin-top: 1rem; margin-bottom: 1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Kuvatakse {len(filtered_analysis)} rida</span></div>", unsafe_allow_html=True)
+
                     dl_col1, dl_col2 = st.columns([3, 1])
                     with dl_col2:
-                        render_excel_download(df_analysis, "materjalivajadus")
+                        render_excel_download(filtered_analysis, "materjalivajadus")
                          
-                    st.dataframe(df_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({"Vaja (tk/m)": "{:g}", "Laos vaba enne": "{:g}", "Puudu (Telli)": "{:g}"}), use_container_width=True, hide_index=True, height=500)
+                    st.dataframe(filtered_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({"Vaja (tk/m)": "{:g}", "Laos vaba enne": "{:g}", "Puudu (Telli)": "{:g}"}), use_container_width=True, hide_index=True, height=500)
                      
                     if len(orders_to_create) > 0:
-                        st.warning(f"⚠️ Analüüs näitab, et sul jääb tuleviku vajaduste katmiseks puudu {len(orders_to_create)} artiklit. Vajuta nuppu, et luua neile automaatselt ootel ostutellimused.")
+                        st.warning(f"⚠️ Analüüs näitab, et sul jääb kogu (filtreerimata) tuleviku vajaduste katmiseks puudu {len(orders_to_create)} artiklit. Vajuta nuppu, et luua neile automaatselt ootel ostutellimused.")
                         if st.button("🛒 Koosta tellimused PUUDUOLEVATELE kogustele", type="primary", use_container_width=True):
                             # Ühe päringuga (varem üks päring TOOTE KOHTA) leitakse iga puuduva toote
                             # viimati kasutatud tarnija, kasutades ROW_NUMBER() akendatud päringut.
