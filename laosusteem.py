@@ -383,7 +383,9 @@ st.markdown("""
     .stApp { background-color: #F8FAFC; }
     
     /* PEALEHE JA KÜLGMENÜÜ ÜHTLANE JOONDUS MAKSIMAALSELT ÜLEVAL */
-    .main .block-container { padding-top: 1.5rem !important; margin-top: -4.5rem !important; }
+    /* Lükkab parempoolset sisu ülespoole */
+    .main .block-container { padding-top: 1rem !important; margin-top: -6.5rem !important; }
+    /* Vasakpoolne menüü püsib oma heal kõrgusel */
     [data-testid="stSidebarUserContent"] { padding-top: 1.5rem !important; margin-top: -3.5rem !important; }
     header[data-testid="stHeader"] { z-index: 0 !important; background: transparent !important; height: 0px !important; }
     
@@ -440,7 +442,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.4 (Lõplik joondus)")
+st.sidebar.caption("Versioon 14.5 (Täpne joondus)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
