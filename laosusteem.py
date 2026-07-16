@@ -382,11 +382,14 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #F8FAFC; }
     
-    /* PEIDA STREAMLITI ÜLEMINE TÜHI RIBA TÄIELIKULT (mis surub muidu paremat sisu alla) */
+    /* PEIDA STREAMLITI ÜLEMINE TÜHI RIBA TÄIELIKULT */
     header[data-testid="stHeader"] { display: none !important; }
     
-    /* MÕLEMA POOLE ÜHTLANE JA TASAKAALUSTATUD JOONDUS */
-    /* Anname mõlemale konteinerile täpselt sama ülemise polstri (padding-top) */
+    /* EEMALDA VASAKULT TÜHI LEHTEDE MENÜÜ RIBA, mis lükkab sisu alla */
+    [data-testid="stSidebarNav"] { display: none !important; }
+    
+    /* TÄPNE JA ÜHTLANE KÕRGUS MÕLEMALE POOLELE */
+    /* Mõlemale poolele täpselt sama padding-top, nii jooksevad pealkirjad horisontaalselt ideaalselt kokku */
     [data-testid="stSidebarUserContent"] { padding-top: 2.5rem !important; }
     [data-testid="stAppViewBlockContainer"] { padding-top: 2.5rem !important; margin-top: 0rem !important; }
     .block-container { padding-top: 2.5rem !important; margin-top: 0rem !important; }
@@ -421,7 +424,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-bottom: 1rem;">
+    <div style="text-align: center; padding-bottom: 1rem; margin-top: -0.5rem;">
         <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
         <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
@@ -445,7 +448,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.7 (Tasakaalustatud joondus)")
+st.sidebar.caption("Versioon 14.8 (Täiuslik sümmeetria)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
