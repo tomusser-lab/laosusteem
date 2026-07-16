@@ -385,13 +385,13 @@ st.markdown("""
     /* PEIDA STREAMLITI ÜLEMINE TÜHI RIBA TÄIELIKULT (mis surub muidu paremat sisu alla) */
     header[data-testid="stHeader"] { display: none !important; }
     
-    /* VASAKMENÜÜ JOONDUS */
-    [data-testid="stSidebarUserContent"] { padding-top: 2rem !important; }
+    /* MÕLEMA POOLE ÜHTLANE JA TASAKAALUSTATUD JOONDUS */
+    /* Anname mõlemale konteinerile täpselt sama ülemise polstri (padding-top) */
+    [data-testid="stSidebarUserContent"] { padding-top: 2.5rem !important; }
+    [data-testid="stAppViewBlockContainer"] { padding-top: 2.5rem !important; margin-top: 0rem !important; }
+    .block-container { padding-top: 2.5rem !important; margin-top: 0rem !important; }
     
-    /* PAREMA SISUALA JOONDUS - Tõmbame jõuliselt üles, kasutades moodsaid andmetribuute */
-    [data-testid="stAppViewBlockContainer"] { padding-top: 1rem !important; margin-top: -3.5rem !important; }
-    .block-container { padding-top: 1rem !important; margin-top: -3.5rem !important; }
-    
+    /* Nullime pealkirjade vaikimisi lisatavad tühikud, et nad alustaksid kasti ülemisest äärest */
     h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
     h2, h3 { color: #1E293B; font-weight: 600; letter-spacing: -0.5px; }
      
@@ -421,7 +421,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-top: 0rem; padding-bottom: 1rem; margin-top: 0rem;">
+    <div style="text-align: center; padding-bottom: 1rem;">
         <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
         <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
@@ -445,7 +445,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.6 (Absoluutne joondus)")
+st.sidebar.caption("Versioon 14.7 (Tasakaalustatud joondus)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
