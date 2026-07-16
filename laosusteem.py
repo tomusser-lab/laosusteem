@@ -219,35 +219,48 @@ def format_color_status(val, red_vals, green_vals, yellow_vals=None, blue_vals=N
  
 @st.cache_data(ttl=300, show_spinner=False)
 def get_cached_inventory(update_trigger):
-    """Vahemällu salvestatud raske päring. update_trigger muutuja invalidates selle automaatselt."""
+    """Vahemällu salvestatud KIIRPÄRING. Kasutab SQL subqueryt grupeerimiseks enne ühendamist."""
     with SessionLocal() as db:
-        in_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity), else_=0)), 0)
-        out_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.OUT_STOCK, Transaction.quantity), else_=0)), 0)
-        ret_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.RETURN, Transaction.quantity), else_=0)), 0)
-        to_prod_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.TO_PROD, Transaction.quantity), else_=0)), 0)
-        prod_cons_qty = func.coalesce(func.sum(case((Transaction.type == TransactionType.PROD_CONS, Transaction.quantity), else_=0)), 0)
-        in_cost = func.coalesce(func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity * Transaction.price), else_=0)), 0)
+        # 1. Samm: Grupeerime transaktsioonid toodete kaupa alam-päringus (subquery). 
+        # See väldib massiivse andmebaasi korral N*M outer-join tabeli tekkimist!
+        t_subq = db.query(
+            Transaction.product_id,
+            func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity), else_=0)).label('in_qty'),
+            func.sum(case((Transaction.type == TransactionType.OUT_STOCK, Transaction.quantity), else_=0)).label('out_qty'),
+            func.sum(case((Transaction.type == TransactionType.RETURN, Transaction.quantity), else_=0)).label('ret_qty'),
+            func.sum(case((Transaction.type == TransactionType.TO_PROD, Transaction.quantity), else_=0)).label('to_prod_qty'),
+            func.sum(case((Transaction.type == TransactionType.PROD_CONS, Transaction.quantity), else_=0)).label('prod_cons_qty'),
+            func.sum(case((Transaction.type == TransactionType.IN_STOCK, Transaction.quantity * Transaction.price), else_=0)).label('in_cost')
+        ).group_by(Transaction.product_id).subquery()
  
+        # 2. Samm: Ühendame tootekataloogi juba kergelt kokkuarvutatud andmetega
         results = db.query(
             Product.id, Product.code, Product.name, Product.product_group,
             Product.default_price, Product.warehouse_unit,
-            in_qty.label('in_qty'), out_qty.label('out_qty'), ret_qty.label('ret_qty'),
-            to_prod_qty.label('to_prod_qty'), prod_cons_qty.label('prod_cons_qty'),
-            in_cost.label('in_cost')
-        ).outerjoin(Transaction, Product.id == Transaction.product_id).group_by(Product.id).all()
+            t_subq.c.in_qty, t_subq.c.out_qty, t_subq.c.ret_qty,
+            t_subq.c.to_prod_qty, t_subq.c.prod_cons_qty, t_subq.c.in_cost
+        ).outerjoin(t_subq, Product.id == t_subq.c.product_id).all()
  
         inventory_data = []
         total_items_main, total_items_prod, total_value = 0, 0, 0.0
  
         for r in results:
-            main_stock = round((r.in_qty + r.ret_qty) - r.out_qty - r.to_prod_qty, 4)
-            prod_stock = round(r.to_prod_qty - r.prod_cons_qty, 4)
+            # Väldime NULL väärtusi, kui tootel puuduvad tehingud
+            in_q = r.in_qty or 0.0
+            out_q = r.out_qty or 0.0
+            ret_q = r.ret_qty or 0.0
+            toprod_q = r.to_prod_qty or 0.0
+            prodcons_q = r.prod_cons_qty or 0.0
+            incost_val = r.in_cost or 0.0
+            
+            main_stock = round((in_q + ret_q) - out_q - toprod_q, 4)
+            prod_stock = round(toprod_q - prodcons_q, 4)
              
             if is_discrete_unit(r.warehouse_unit):
                 main_stock = round(main_stock)
                 prod_stock = round(prod_stock)
                  
-            avg_price = float(r.in_cost) / float(r.in_qty) if r.in_qty > 0 else (r.default_price or 0.0)
+            avg_price = float(incost_val) / float(in_q) if in_q > 0 else (r.default_price or 0.0)
              
             total_items_main += main_stock
             total_items_prod += prod_stock
@@ -399,7 +412,7 @@ menyuu_valik = st.sidebar.radio("Menüü", [
     "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
 ], label_visibility="collapsed")
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 12.2 (Kiirendatud)")
+st.sidebar.caption("Versioon 12.3 (Maksimaalne jõudlus)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -1540,7 +1553,8 @@ def render_history(db):
     elif "RETURN" in f_val: q = q.filter(Transaction.type == TransactionType.RETURN)
      
     data = []
-    for t in q.limit(3000).all():
+    # KIIRENDUS: Piirame limiidi 1500 peale, et vältida brauseri kokkujooksmist suure andmemahuga.
+    for t in q.limit(1500).all():
         ttype_name = t.type.name if hasattr(t.type, 'name') else t.type
         ttype = {"IN_STOCK": "Sissetulek (IN)", "OUT_STOCK": "Väljaminek (OUT)", "TO_PROD": "Kanti tootmisse (TO_PROD)", "PROD_CONS": "Tootmise kulu (PROD_CONS)", "RETURN": "Tagastus (RETURN)"}.get(ttype_name, ttype_name)
          
@@ -1556,8 +1570,8 @@ def render_history(db):
         df = pd.DataFrame(data)
         with h_col2:
             render_excel_download(df, "ajalugu")
-        if len(data) == 3000:
-            st.warning("⚠️ Kuvatakse ainult viimased 3000 kannet, et hoida süsteem kiirena.")
+        if len(data) == 1500:
+            st.warning("⚠️ Kuvatakse ainult viimased 1500 kannet, et hoida süsteem kiirena.")
         st.dataframe(df.style.map(lambda v: format_color_status(v, {'Väljaminek (OUT)'}, {'Sissetulek (IN)'}, {'Kanti tootmisse (TO_PROD)'}, {'Tagastus (RETURN)'}, {'Tootmise kulu (PROD_CONS)'}), subset=['Tüüp']).format({"Kogus": "{:g}", "Hind (€)": "{:.2f}"}), use_container_width=True, hide_index=True, height=600)
     else: st.info("Kandeid ei leitud.")
  
