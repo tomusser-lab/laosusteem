@@ -412,18 +412,31 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-top: 0rem; padding-bottom: 2rem;">
-        <h1 style="color: #1E293B; font-size: 2.4rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Ladu</h1>
-        <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Nutikas Haldussüsteem</p>
+    <div style="text-align: center; padding-top: 0rem; padding-bottom: 1rem;">
+        <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
+        <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
 """, unsafe_allow_html=True)
- 
-menyuu_valik = st.sidebar.radio("Menüü", [
-    "📊 Ladu ja Töölaud", "📋 Tootekataloog", "📥 Sissetulek", "📤 Väljastus / Tootmine", 
-    "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "🧩 Toote struktuurid (BOM)", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
-], label_visibility="collapsed")
+
+# 1. Peakategooria valik
+peamenyuu_valik = st.sidebar.radio("Peakategooria", ["📦 LAOSÜSTEEM", "⚙️ TOOTMINE JA BOM"], label_visibility="collapsed")
+st.sidebar.markdown("---")
+
+# 2. Alamkategooria valik vastavalt valitud peamenüüle
+if peamenyuu_valik == "📦 LAOSÜSTEEM":
+    st.sidebar.caption("📦 LAO FUNKTSIOONID")
+    menyuu_valik = st.sidebar.radio("Alammenüü", [
+        "📊 Ladu ja Töölaud", "📋 Tootekataloog", "📥 Sissetulek", "📤 Väljastus / Tootmine", 
+        "🛒 Ostutellimused", "📝 Inventuur / Tagastus", "✨ Lisa / Muuda toodet", "🏢 Tarnijate haldus", "🕒 Kannete ajalugu"
+    ], label_visibility="collapsed")
+else:
+    st.sidebar.caption("⚙️ TOOTMISE FUNKTSIOONID")
+    menyuu_valik = st.sidebar.radio("Alammenüü", [
+        "🧩 Toote struktuurid (BOM)"
+    ], label_visibility="collapsed")
+
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 13.0 (Toote struktuurid)")
+st.sidebar.caption("Versioon 14.0 (Mooduliteks jagatud)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
@@ -1689,12 +1702,17 @@ def render_product_structures(db):
 # Uus lähenemine: Kasutame context manageri (with ...), mis hoiab andmebaasiühenduse lahti
 # minimaalse võimaliku aja jooksul ja tagab, et see pannakse alati kinni isegi crashi korral.
 with SessionLocal() as db:
-    if menyuu_valik == "📊 Ladu ja Töölaud": render_dashboard()
-    elif menyuu_valik == "📋 Tootekataloog": render_catalog(db)
-    elif menyuu_valik in ["📥 Sissetulek", "📤 Väljastus / Tootmine"]: render_transactions(db, menyuu_valik == "📥 Sissetulek")
-    elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
-    elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
-    elif menyuu_valik == "🧩 Toote struktuurid (BOM)": render_product_structures(db)
-    elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
-    elif menyuu_valik == "🏢 Tarnijate haldus": render_suppliers(db)
-    elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
+    # LAO FUNKTSIOONID
+    if peamenyuu_valik == "📦 LAOSÜSTEEM":
+        if menyuu_valik == "📊 Ladu ja Töölaud": render_dashboard()
+        elif menyuu_valik == "📋 Tootekataloog": render_catalog(db)
+        elif menyuu_valik in ["📥 Sissetulek", "📤 Väljastus / Tootmine"]: render_transactions(db, menyuu_valik == "📥 Sissetulek")
+        elif menyuu_valik == "🛒 Ostutellimused": render_orders(db)
+        elif menyuu_valik == "📝 Inventuur / Tagastus": render_inventory(db)
+        elif menyuu_valik == "✨ Lisa / Muuda toodet": render_product_management(db)
+        elif menyuu_valik == "🏢 Tarnijate haldus": render_suppliers(db)
+        elif menyuu_valik == "🕒 Kannete ajalugu": render_history(db)
+    
+    # TOOTMISE FUNKTSIOONID
+    elif peamenyuu_valik == "⚙️ TOOTMINE JA BOM":
+        if menyuu_valik == "🧩 Toote struktuurid (BOM)": render_product_structures(db)
