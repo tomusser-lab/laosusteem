@@ -1122,12 +1122,12 @@ def render_orders(db):
                     if f_only_missing:
                         filtered_analysis = filtered_analysis[filtered_analysis["Puudu (Telli)"] > 0]
                         
-                    st.markdown(f"<div style='margin-top: 1rem; margin-bottom: 1rem; padding-left: 0.5rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Kuvatakse {len(filtered_analysis)} rida</span></div>", unsafe_allow_html=True)
-
                     dl_col1, dl_col2 = st.columns([3, 1])
+                    with dl_col1:
+                        st.markdown(f"<div style='padding-left: 0.5rem; padding-top: 1rem;'><span style='color:#64748B; font-weight: 600; font-size:1rem;'>Kuvatakse {len(filtered_analysis)} rida</span></div>", unsafe_allow_html=True)
                     with dl_col2:
                         render_excel_download(filtered_analysis, "materjalivajadus")
-                         
+
                     st.dataframe(filtered_analysis.style.map(highlight_deficit, subset=['Puudu (Telli)']).format({"Vaja (tk/m)": "{:g}", "Laos vaba enne": "{:g}", "Puudu (Telli)": "{:g}"}), use_container_width=True, hide_index=True, height=500)
                      
                     if len(orders_to_create) > 0:
