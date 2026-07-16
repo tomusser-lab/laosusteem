@@ -388,11 +388,10 @@ st.markdown("""
     /* EEMALDA VASAKULT TÜHI LEHTEDE MENÜÜ RIBA, mis lükkab sisu alla */
     [data-testid="stSidebarNav"] { display: none !important; }
     
-    /* TÄPNE JA ÜHTLANE KÕRGUS MÕLEMALE POOLELE */
-    /* Mõlemale poolele täpselt sama padding-top, nii jooksevad pealkirjad horisontaalselt ideaalselt kokku */
-    [data-testid="stSidebarUserContent"] { padding-top: 0.5rem !important; margin-top: 0rem !important; }
-    [data-testid="stAppViewBlockContainer"] { padding-top: 0.5rem !important; margin-top: 0rem !important; }
-    .block-container { padding-top: 0.5rem !important; margin-top: 0rem !important; }
+    /* ERINEV KÕRGUS: Parempoolne sisu jääb paigale, vasak menüü tõstetakse üles */
+    [data-testid="stSidebarUserContent"] { padding-top: 0rem !important; margin-top: -1rem !important; }
+    [data-testid="stAppViewBlockContainer"] { padding-top: 2.5rem !important; margin-top: 0rem !important; }
+    .block-container { padding-top: 2.5rem !important; margin-top: 0rem !important; }
     
     /* Nullime pealkirjade vaikimisi lisatavad tühikud, et nad alustaksid kasti ülemisest äärest */
     h1 { color: #0F172A; font-weight: 800; letter-spacing: -1px; margin-top: 0 !important; padding-top: 0 !important; }
@@ -407,6 +406,7 @@ st.markdown("""
     .stButton>button { border-radius: 12px; font-weight: 600; background: #2563EB; color: white; border: none; padding: 0.6rem 1.5rem; transition: all 0.2s ease; }
     .stButton>button:hover { background: #1D4ED8; transform: translateY(-2px); box-shadow: 0 6px 12px -2px rgba(37, 99, 235, 0.3); color: white; }
      
+    [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2E8F0; }
     [data-testid="stSidebar"] .stRadio > div > label > div:first-child { display: none; }
     [data-testid="stSidebar"] .stRadio > div > label { background-color: transparent; padding: 0.8rem 1rem; border-radius: 12px; margin-bottom: 0.2rem; cursor: pointer; }
     [data-testid="stSidebar"] .stRadio > div > label p { font-size: 1.05rem; font-weight: 600; color: #475569; margin: 0; }
@@ -424,7 +424,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 st.sidebar.markdown("""
-    <div style="text-align: center; padding-bottom: 1rem; margin-top: -0.5rem;">
+    <div style="text-align: center; padding-bottom: 1rem; margin-top: -1rem;">
         <h1 style="color: #1E293B; font-size: 2.2rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0;">📦 Süsteem</h1>
         <p style="color: #64748B; font-size: 0.85rem; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Haldus ja Tootmine</p>
     </div>
@@ -448,7 +448,7 @@ else:
     ], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versioon 14.9 (Koos tõstetud)")
+st.sidebar.caption("Versioon 15.0 (Vasak menüü joondatud)")
  
 # ==========================================
 # 4. LEHEKÜLGEDE FUNKTSIOONID
